@@ -318,139 +318,135 @@
         <button id="zoomResetBtn">100%</button>
         <button id="zoomOutBtn">🔍ー</button>
       </div>
-      <button id="downloadGifBtn" class="primary" style="background:#d97706; width:100%;">👾 GIF保存 </button>
-      <button id="downloadBtn" style="background:#4b5563; margin-top:4px;">💾 1コマ(PNG)</button>
+      <button id="downloadApngBtn" class="primary" style="background:#059669; width:100%;">🎬 APNG (.png)</button>
+      <div class="btn-group" style="margin-top: 4px;">
+        <button id="downloadWebmBtn" style="background:#2563eb;">🎥 WebM</button>
+        <button id="downloadBtn" style="background:#4b5563;">💾 1コマ(PNG)</button>
+      </div>
     </div>
   </div>
 
   <script>
-    // --- 超軽量 内蔵GIFエンコーダー ---
-    class SimpleGifEncoder {
+    // --- 完全自己完結型 APNG エンコーダー ---
+    class StandaloneApngEncoder {
       constructor(width, height, delayMs) {
         this.width = width;
         this.height = height;
-        this.delay = Math.max(2, Math.round(delayMs / 10)); // 1/100秒単位
-        this.buffer = [];
+        this.delayMs = delayMs;
+        this.crcTable = this.makeCrcTable();
       }
 
-      writeString(str) {
-        for (let i = 0; i < str.length; i++) this.buffer.push(str.charCodeAt(i));
+      makeCrcTable() {
+        const cTable = [];
+        for (let n = 0; n < 256; n++) {
+          let c = n;
+          for (let k = 0; k < 8; k++) {
+            c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+          }
+          cTable[n] = c;
+        }
+        return cTable;
       }
 
-      writeShort(val) {
-        this.buffer.push(val & 0xFF, (val >> 8) & 0xFF);
+      crc32(buf, off, len) {
+        let c = -1;
+        for (let i = 0; i < len; i++) {
+          c = this.crcTable[(c ^ buf[off + i]) & 0xff] ^ (c >>> 8);
+        }
+        return (c ^ -1) >>> 0;
       }
 
-      start() {
-        this.writeString("GIF89a");
-        this.writeShort(this.width);
-        this.writeShort(this.height);
-        this.buffer.push(0xF7, 0, 0); // 256色 グローバルパレット設定
+      writeChunk(type, data) {
+        const len = data.length;
+        const buf = new Uint8Array(12 + len);
+        const view = new DataView(buf.buffer);
 
-        // 256色ダミーパレット
-        for (let i = 0; i < 256 * 3; i++) this.buffer.push(0);
+        view.setUint32(0, len);
+        for (let i = 0; i < 4; i++) buf[4 + i] = type.charCodeAt(i);
+        buf.set(data, 8);
 
-        // 永久ループ拡張ブロック
-        this.buffer.push(0x21, 0xFF, 0x0B);
-        this.writeString("NETSCAPE2.0");
-        this.buffer.push(0x03, 0x01, 0x00, 0x00, 0x00);
+        const crc = this.crc32(buf, 4, len + 4);
+        view.setUint32(8 + len, crc);
+        return buf;
       }
 
-      addFrame(ctx, isTransparent) {
-        const imgData = ctx.getImageData(0, 0, this.width, this.height).data;
-        const palette = [];
-        const colorMap = new Map();
-        const indexedPixels = [];
+      async createPngBlob(canvasDataUrls) {
+        const buffers = await Promise.all(canvasDataUrls.map(async url => {
+          const res = await fetch(url);
+          return new Uint8Array(await res.arrayBuffer());
+        }));
 
-        let transparentIndex = -1;
+        const chunks = [];
+        chunks.push(new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])); // PNG Header
 
-        for (let i = 0; i < imgData.length; i += 4) {
-          const r = imgData[i], g = imgData[i+1], b = imgData[i+2], a = imgData[i+3];
+        const firstPng = buffers[0];
+        let pos = 8;
+        let ihdrChunk = null;
 
-          if (isTransparent && a < 128) {
-            if (transparentIndex === -1) {
-              transparentIndex = palette.length;
-              palette.push([0, 0, 0]);
+        while (pos < firstPng.length) {
+          const len = new DataView(firstPng.buffer).getUint32(pos);
+          const type = String.fromCharCode(...firstPng.slice(pos + 4, pos + 8));
+          if (type === 'IHDR') {
+            ihdrChunk = firstPng.slice(pos, pos + 12 + len);
+            break;
+          }
+          pos += 12 + len;
+        }
+        chunks.push(ihdrChunk);
+
+        // acTL チャンク
+        const actlData = new Uint8Array(8);
+        const actlView = new DataView(actlData.buffer);
+        actlView.setUint32(0, buffers.length);
+        actlView.setUint32(4, 0); // 0 = 永久ループ
+        chunks.push(this.writeChunk('acTL', actlData));
+
+        let sequenceNumber = 0;
+
+        for (let i = 0; i < buffers.length; i++) {
+          const png = buffers[i];
+          pos = 8;
+          let idatBytes = [];
+
+          while (pos < png.length) {
+            const len = new DataView(png.buffer).getUint32(pos);
+            const type = String.fromCharCode(...png.slice(pos + 4, pos + 8));
+            if (type === 'IDAT') {
+              idatBytes.push(png.slice(pos + 8, pos + 8 + len));
             }
-            indexedPixels.push(transparentIndex);
-          } else {
-            const key = (r << 16) | (g << 8) | b;
-            if (!colorMap.has(key)) {
-              if (palette.length < 256) {
-                colorMap.set(key, palette.length);
-                palette.push([r, g, b]);
-              } else {
-                colorMap.set(key, 0); // 256色超過時のフォールバック
-              }
+            pos += 12 + len;
+          }
+
+          // fcTL チャンク
+          const fctlData = new Uint8Array(26);
+          const fctlView = new DataView(fctlData.buffer);
+          fctlView.setUint32(0, sequenceNumber++);
+          fctlView.setUint32(4, this.width);
+          fctlView.setUint32(8, this.height);
+          fctlView.setUint32(12, 0);
+          fctlView.setUint32(16, 0);
+          fctlView.setUint16(20, this.delayMs);
+          fctlView.setUint16(22, 1000);
+          fctlData[24] = 0;
+          fctlData[25] = 0;
+
+          chunks.push(this.writeChunk('fcTL', fctlData));
+
+          for (const rawIdat of idatBytes) {
+            if (i === 0) {
+              chunks.push(this.writeChunk('IDAT', rawIdat));
+            } else {
+              const fdatData = new Uint8Array(4 + rawIdat.length);
+              const fdatView = new DataView(fdatData.buffer);
+              fdatView.setUint32(0, sequenceNumber++);
+              fdatData.set(rawIdat, 4);
+              chunks.push(this.writeChunk('fdAT', fdatData));
             }
-            indexedPixels.push(colorMap.get(key));
           }
         }
 
-        // グラフィック制御拡張（透明色 ＆ 遅延時間）
-        this.buffer.push(0x21, 0xF9, 0x04);
-        this.buffer.push(transparentIndex !== -1 ? 0x09 : 0x04); // 処分方法 & 透過フラグ
-        this.writeShort(this.delay);
-        this.buffer.push(transparentIndex !== -1 ? transparentIndex : 0, 0x00);
-
-        // 画像ブロック
-        this.buffer.push(0x2C);
-        this.writeShort(0); // X
-        this.writeShort(0); // Y
-        this.writeShort(this.width);
-        this.writeShort(this.height);
-        this.buffer.push(0x87); // ローカルパレットフラグ (256色)
-
-        // ローカルパレットの書き込み
-        for (let i = 0; i < 256; i++) {
-          if (i < palette.length) {
-            this.buffer.push(palette[i][0], palette[i][1], palette[i][2]);
-          } else {
-            this.buffer.push(0, 0, 0);
-          }
-        }
-
-        // LZW 圧縮データの簡易生成
-        const minCodeSize = 8;
-        this.buffer.push(minCodeSize);
-
-        const clearCode = 1 << minCodeSize;
-        const eofCode = clearCode + 1;
-
-        let curBit = 0;
-        let curByte = 0;
-        const subBlocks = [];
-
-        function writeBits(val, bits) {
-          curByte |= (val << curBit);
-          curBit += bits;
-          while (curBit >= 8) {
-            subBlocks.push(curByte & 0xFF);
-            curByte >>= 8;
-            curBit -= 8;
-          }
-        }
-
-        writeBits(clearCode, 9);
-        for (let i = 0; i < indexedPixels.length; i++) {
-          writeBits(indexedPixels[i], 9);
-          if ((i + 1) % 100 === 0) writeBits(clearCode, 9);
-        }
-        writeBits(eofCode, 9);
-        if (curBit > 0) subBlocks.push(curByte & 0xFF);
-
-        // サブブロック書き出し
-        for (let i = 0; i < subBlocks.length; i += 255) {
-          const chunk = subBlocks.slice(i, i + 255);
-          this.buffer.push(chunk.length);
-          for (let b of chunk) this.buffer.push(b);
-        }
-        this.buffer.push(0x00); // 終端
-      }
-
-      finish() {
-        this.buffer.push(0x3B); // GIF終端記号
-        return new Uint8Array(this.buffer);
+        chunks.push(this.writeChunk('IEND', new Uint8Array(0)));
+        return new Blob(chunks, { type: 'image/png' });
       }
     }
 
@@ -751,6 +747,7 @@
     function shiftFrameData(dx, dy) {
       const current = frames[currentFrameIndex];
       const shifted = createEmptyFrame();
+
       for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
           if (current[r] && current[r][c]) {
@@ -760,6 +757,7 @@
           }
         }
       }
+
       frames[currentFrameIndex] = shifted;
       render();
     }
@@ -771,12 +769,14 @@
 
     document.getElementById('onionToggle').onchange = render;
 
+    // 再生ボタン
     document.getElementById('playBtn').onclick = (e) => {
       isPlaying = !isPlaying;
       if (isPlaying) {
         e.target.textContent = "⏹ 停止";
         e.target.className = "danger";
         hoverCtx.clearRect(0, 0, hoverCanvas.width, hoverCanvas.height);
+        
         const delay = parseInt(document.getElementById('frameDelayInput').value) || 200;
         playInterval = setInterval(() => {
           currentFrameIndex = (currentFrameIndex + 1) % frames.length;
@@ -798,56 +798,93 @@
       link.click();
     };
 
-    // --- 完全内蔵 GIF 保存処理 ---
-    document.getElementById('downloadGifBtn').onclick = () => {
-      const btn = document.getElementById('downloadGifBtn');
-      btn.textContent = "GIF生成中...";
+    // --- APNG書き出し ---
+    document.getElementById('downloadApngBtn').onclick = async () => {
+      const btn = document.getElementById('downloadApngBtn');
+      btn.textContent = "APNG生成中...";
       btn.disabled = true;
 
       const delayMs = parseInt(document.getElementById('frameDelayInput').value) || 200;
       const isTransparent = document.getElementById('transparentToggle').checked;
 
-      setTimeout(() => {
-        try {
-          const encoder = new SimpleGifEncoder(cols, rows, delayMs);
-          encoder.start();
+      try {
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = cols;
+        tempCanvas.height = rows;
+        const tempCtx = tempCanvas.getContext('2d');
 
-          const tempCanvas = document.createElement('canvas');
-          tempCanvas.width = cols;
-          tempCanvas.height = rows;
-          const tempCtx = tempCanvas.getContext('2d');
+        const canvasUrls = frames.map(frameData => {
+          tempCtx.clearRect(0, 0, cols, rows);
+          if (!isTransparent) {
+            tempCtx.fillStyle = '#ffffff';
+            tempCtx.fillRect(0, 0, cols, rows);
+          }
+          drawFrameData(tempCtx, frameData, 1);
+          return tempCanvas.toDataURL('image/png');
+        });
 
-          frames.forEach((frameData) => {
-            tempCtx.clearRect(0, 0, cols, rows);
-            if (!isTransparent) {
-              tempCtx.fillStyle = '#ffffff';
-              tempCtx.fillRect(0, 0, cols, rows);
-            }
-            drawFrameData(tempCtx, frameData, 1);
-            encoder.addFrame(tempCtx, isTransparent);
-          });
+        const encoder = new StandaloneApngEncoder(cols, rows, delayMs);
+        const apngBlob = await encoder.createPngBlob(canvasUrls);
 
-          const gifBytes = encoder.finish();
-          const blob = new Blob([gifBytes], { type: 'image/gif' });
-          const url = URL.createObjectURL(blob);
+        const url = URL.createObjectURL(apngBlob);
+        const link = document.createElement('a');
+        link.download = `pixel_animation_${cols}x${rows}.png`;
+        link.href = url;
+        link.click();
 
-          const link = document.createElement('a');
-          link.download = `pixel_animation_${cols}x${rows}.gif`;
-          link.href = url;
-          link.click();
+      } catch (err) {
+        alert("APNG保存エラー: " + err.message);
+        console.error(err);
+      } finally {
+        btn.textContent = "🎬 APNGアニメ保存 (.png)";
+        btn.disabled = false;
+      }
+    };
 
-        } catch (err) {
-          alert("GIF出力エラー: " + err.message);
-          console.error(err);
-        } finally {
-          btn.textContent = "👾 GIFアニメ保存 (確実動作)";
-          btn.disabled = false;
+    // WebM動画書き出し
+    document.getElementById('downloadWebmBtn').onclick = () => {
+      try {
+        const stream = mainCanvas.captureStream(30);
+        let options = { mimeType: 'video/webm' };
+        if (!MediaRecorder.isTypeSupported('video/webm')) {
+          options = { mimeType: 'video/mp4' };
         }
-      }, 50);
+
+        const recorder = new MediaRecorder(stream, options);
+        const chunks = [];
+        const delayMs = parseInt(document.getElementById('frameDelayInput').value) || 200;
+
+        recorder.ondataavailable = e => chunks.push(e.data);
+        recorder.onstop = () => {
+          const blob = new Blob(chunks, { type: recorder.mimeType });
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `pixel_animation_${cols}x${rows}.${recorder.mimeType.includes('mp4') ? 'mp4' : 'webm'}`;
+          link.click();
+        };
+
+        recorder.start();
+
+        let count = 0;
+        const recordInterval = setInterval(() => {
+          currentFrameIndex = count;
+          render();
+          count++;
+          if (count >= frames.length) {
+            clearInterval(recordInterval);
+            setTimeout(() => recorder.stop(), delayMs);
+          }
+        }, delayMs);
+
+      } catch (err) {
+        alert("動画の保存に対応していないブラウザです。");
+      }
     };
 
     // パネルドラッグ＆リサイズ処理
     let topZIndex = 100;
+
     function makeDraggableAndResizable(panel) {
       const header = panel.querySelector('.panel-header');
       let isDragging = false;
@@ -871,16 +908,28 @@
         const rect = panel.getBoundingClientRect();
         initialLeft = rect.left;
         initialTop = rect.top;
+
         topZIndex++;
         panel.style.zIndex = topZIndex;
       }
 
       function moveDrag(clientX, clientY) {
         if (!isDragging) return;
-        let newLeft = initialLeft + (clientX - startX);
-        let newTop = initialTop + (clientY - startY);
-        panel.style.left = `${Math.max(0, Math.min(newLeft, window.innerWidth - panel.offsetWidth))}px`;
-        panel.style.top = `${Math.max(0, Math.min(newTop, window.innerHeight - panel.offsetHeight))}px`;
+
+        const deltaX = clientX - startX;
+        const deltaY = clientY - startY;
+
+        let newLeft = initialLeft + deltaX;
+        let newTop = initialTop + deltaY;
+
+        const maxLeft = window.innerWidth - panel.offsetWidth;
+        const maxTop = window.innerHeight - panel.offsetHeight;
+
+        newLeft = Math.max(0, Math.min(newLeft, maxLeft));
+        newTop = Math.max(0, Math.min(newTop, maxTop));
+
+        panel.style.left = `${newLeft}px`;
+        panel.style.top = `${newTop}px`;
         panel.style.right = 'auto';
         panel.style.bottom = 'auto';
       }
@@ -888,9 +937,7 @@
       function endDrag() {
         if (isDragging) {
           isDragging = false;
-          localStorage.setItem(`panel_layout_${panel.id}`, JSON.stringify({
-            left: panel.style.left, top: panel.style.top, width: panel.style.width, height: panel.style.height
-          }));
+          savePanelLayout(panel);
         }
       }
 
@@ -898,9 +945,32 @@
       document.addEventListener('mousemove', (e) => moveDrag(e.clientX, e.clientY));
       document.addEventListener('mouseup', endDrag);
 
-      header.addEventListener('touchstart', (e) => startDrag(e.touches[0].clientX, e.touches[0].clientY), { passive: true });
-      document.addEventListener('touchmove', (e) => moveDrag(e.touches[0].clientX, e.touches[0].clientY), { passive: true });
+      header.addEventListener('touchstart', (e) => {
+        const touch = e.touches[0];
+        startDrag(touch.clientX, touch.clientY);
+      }, { passive: true });
+
+      document.addEventListener('touchmove', (e) => {
+        if (!isDragging) return;
+        const touch = e.touches[0];
+        moveDrag(touch.clientX, touch.clientY);
+      }, { passive: true });
+
       document.addEventListener('touchend', endDrag);
+
+      const resizeObserver = new ResizeObserver(() => {
+        savePanelLayout(panel);
+      });
+      resizeObserver.observe(panel);
+    }
+
+    function savePanelLayout(panel) {
+      localStorage.setItem(`panel_layout_${panel.id}`, JSON.stringify({
+        left: panel.style.left,
+        top: panel.style.top,
+        width: panel.style.width,
+        height: panel.style.height
+      }));
     }
 
     document.querySelectorAll('.draggable-panel').forEach(makeDraggableAndResizable);
