@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>ドット絵エディター</title>
+  <title>可動式ツール付き ドット絵アニメエディター</title>
   <style>
     :root {
       --bg-color: #1a1a24;
@@ -21,6 +21,7 @@
       padding: 0;
       touch-action: manipulation;
       user-select: none;
+      -webkit-user-select: none;
     }
 
     body {
@@ -100,8 +101,8 @@
       z-index: 100;
       min-width: 180px;
       min-height: 120px;
-      resize: both; /* ドラッグでサイズ変更可能にするCSS */
-      overflow: auto; /* リサイズ用ハンドルを表示 */
+      resize: both;
+      overflow: auto;
     }
 
     .panel-header {
@@ -119,6 +120,7 @@
       position: sticky;
       top: 0;
       z-index: 10;
+      touch-action: none; /* タッチ移動時のスクロール防止 */
     }
 
     .panel-header:hover {
@@ -300,7 +302,7 @@
         <button id="nextFrameBtn">次 ▶</button>
       </div>
       <div class="btn-group">
-        <button id="addFrameBtn">＋ 新規</button>
+        <button id="addFrameBtn">＋ 新規コマ</button>
         <button id="copyFrameBtn" class="primary">📋 複製</button>
       </div>
 
@@ -705,7 +707,7 @@
       link.click();
     };
 
-    // --- パネルドラッグ＆ドロップ ＆ リサイズ機能 ---
+    // --- パネルドラッグ＆ドロップ（マウス＆スマホタッチ両対応） ---
     let topZIndex = 100;
 
     function makeDraggableAndResizable(panel) {
@@ -725,23 +727,23 @@
         panel.style.bottom = 'auto';
       }
 
-      header.addEventListener('mousedown', (e) => {
+      function startDrag(clientX, clientY) {
         isDragging = true;
-        startX = e.clientX;
-        startY = e.clientY;
+        startX = clientX;
+        startY = clientY;
         const rect = panel.getBoundingClientRect();
         initialLeft = rect.left;
         initialTop = rect.top;
 
         topZIndex++;
         panel.style.zIndex = topZIndex;
-      });
+      }
 
-      document.addEventListener('mousemove', (e) => {
+      function moveDrag(clientX, clientY) {
         if (!isDragging) return;
 
-        const deltaX = e.clientX - startX;
-        const deltaY = e.clientY - startY;
+        const deltaX = clientX - startX;
+        const deltaY = clientY - startY;
 
         let newLeft = initialLeft + deltaX;
         let newTop = initialTop + deltaY;
@@ -756,16 +758,35 @@
         panel.style.top = `${newTop}px`;
         panel.style.right = 'auto';
         panel.style.bottom = 'auto';
-      });
+      }
 
-      document.addEventListener('mouseup', () => {
+      function endDrag() {
         if (isDragging) {
           isDragging = false;
           savePanelLayout(panel);
         }
-      });
+      }
 
-      // サイズ変更の検出と保存（ResizeObserverを使用）
+      // マウス操作用
+      header.addEventListener('mousedown', (e) => startDrag(e.clientX, e.clientY));
+      document.addEventListener('mousemove', (e) => moveDrag(e.clientX, e.clientY));
+      document.addEventListener('mouseup', endDrag);
+
+      // スマホタッチ操作用
+      header.addEventListener('touchstart', (e) => {
+        const touch = e.touches[0];
+        startDrag(touch.clientX, touch.clientY);
+      }, { passive: true });
+
+      document.addEventListener('touchmove', (e) => {
+        if (!isDragging) return;
+        const touch = e.touches[0];
+        moveDrag(touch.clientX, touch.clientY);
+      }, { passive: true });
+
+      document.addEventListener('touchend', endDrag);
+
+      // サイズ変更の検出と保存
       const resizeObserver = new ResizeObserver(() => {
         savePanelLayout(panel);
       });
