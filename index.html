@@ -3,11 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>ドットエディター</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/upng-js@2.1.0/UPNG.min.js"></script>
-  <!-- GIF出力用ライブラリ -->
-  <script src="https://cdn.jsdelivr.net/npm/omggif@1.0.10/omggif.min.js"></script>
+  <title>ドット絵ディター</title>
   <style>
     :root {
       --bg-color: #1a1a24;
@@ -280,7 +276,6 @@
         <label><input type="checkbox" id="onionToggle" checked> 前コマ透過</label>
       </div>
       
-      <!-- 速度設定（ミリ秒） -->
       <div class="row" style="justify-content: space-between;">
         <label>速度(ms): <input type="number" id="frameDelayInput" value="200" min="20" max="2000" step="10"></label>
         <span style="font-size:0.7rem; color:#aaa;">(大きい＝遅い)</span>
@@ -323,16 +318,143 @@
         <button id="zoomResetBtn">100%</button>
         <button id="zoomOutBtn">🔍ー</button>
       </div>
-      <button id="downloadGifBtn" class="primary" style="background:#d97706; width:100%;">👾 GIF</button>
-      <div class="btn-group" style="margin-top: 4px;">
-        <button id="downloadApngBtn" style="background:#059669;">🎬 APNG</button>
-        <button id="downloadWebmBtn" style="background:#2563eb;">🎥 WebM</button>
-      </div>
+      <button id="downloadGifBtn" class="primary" style="background:#d97706; width:100%;">👾 GIF保存 </button>
       <button id="downloadBtn" style="background:#4b5563; margin-top:4px;">💾 1コマ(PNG)</button>
     </div>
   </div>
 
   <script>
+    // --- 超軽量 内蔵GIFエンコーダー ---
+    class SimpleGifEncoder {
+      constructor(width, height, delayMs) {
+        this.width = width;
+        this.height = height;
+        this.delay = Math.max(2, Math.round(delayMs / 10)); // 1/100秒単位
+        this.buffer = [];
+      }
+
+      writeString(str) {
+        for (let i = 0; i < str.length; i++) this.buffer.push(str.charCodeAt(i));
+      }
+
+      writeShort(val) {
+        this.buffer.push(val & 0xFF, (val >> 8) & 0xFF);
+      }
+
+      start() {
+        this.writeString("GIF89a");
+        this.writeShort(this.width);
+        this.writeShort(this.height);
+        this.buffer.push(0xF7, 0, 0); // 256色 グローバルパレット設定
+
+        // 256色ダミーパレット
+        for (let i = 0; i < 256 * 3; i++) this.buffer.push(0);
+
+        // 永久ループ拡張ブロック
+        this.buffer.push(0x21, 0xFF, 0x0B);
+        this.writeString("NETSCAPE2.0");
+        this.buffer.push(0x03, 0x01, 0x00, 0x00, 0x00);
+      }
+
+      addFrame(ctx, isTransparent) {
+        const imgData = ctx.getImageData(0, 0, this.width, this.height).data;
+        const palette = [];
+        const colorMap = new Map();
+        const indexedPixels = [];
+
+        let transparentIndex = -1;
+
+        for (let i = 0; i < imgData.length; i += 4) {
+          const r = imgData[i], g = imgData[i+1], b = imgData[i+2], a = imgData[i+3];
+
+          if (isTransparent && a < 128) {
+            if (transparentIndex === -1) {
+              transparentIndex = palette.length;
+              palette.push([0, 0, 0]);
+            }
+            indexedPixels.push(transparentIndex);
+          } else {
+            const key = (r << 16) | (g << 8) | b;
+            if (!colorMap.has(key)) {
+              if (palette.length < 256) {
+                colorMap.set(key, palette.length);
+                palette.push([r, g, b]);
+              } else {
+                colorMap.set(key, 0); // 256色超過時のフォールバック
+              }
+            }
+            indexedPixels.push(colorMap.get(key));
+          }
+        }
+
+        // グラフィック制御拡張（透明色 ＆ 遅延時間）
+        this.buffer.push(0x21, 0xF9, 0x04);
+        this.buffer.push(transparentIndex !== -1 ? 0x09 : 0x04); // 処分方法 & 透過フラグ
+        this.writeShort(this.delay);
+        this.buffer.push(transparentIndex !== -1 ? transparentIndex : 0, 0x00);
+
+        // 画像ブロック
+        this.buffer.push(0x2C);
+        this.writeShort(0); // X
+        this.writeShort(0); // Y
+        this.writeShort(this.width);
+        this.writeShort(this.height);
+        this.buffer.push(0x87); // ローカルパレットフラグ (256色)
+
+        // ローカルパレットの書き込み
+        for (let i = 0; i < 256; i++) {
+          if (i < palette.length) {
+            this.buffer.push(palette[i][0], palette[i][1], palette[i][2]);
+          } else {
+            this.buffer.push(0, 0, 0);
+          }
+        }
+
+        // LZW 圧縮データの簡易生成
+        const minCodeSize = 8;
+        this.buffer.push(minCodeSize);
+
+        const clearCode = 1 << minCodeSize;
+        const eofCode = clearCode + 1;
+
+        let curBit = 0;
+        let curByte = 0;
+        const subBlocks = [];
+
+        function writeBits(val, bits) {
+          curByte |= (val << curBit);
+          curBit += bits;
+          while (curBit >= 8) {
+            subBlocks.push(curByte & 0xFF);
+            curByte >>= 8;
+            curBit -= 8;
+          }
+        }
+
+        writeBits(clearCode, 9);
+        for (let i = 0; i < indexedPixels.length; i++) {
+          writeBits(indexedPixels[i], 9);
+          if ((i + 1) % 100 === 0) writeBits(clearCode, 9);
+        }
+        writeBits(eofCode, 9);
+        if (curBit > 0) subBlocks.push(curByte & 0xFF);
+
+        // サブブロック書き出し
+        for (let i = 0; i < subBlocks.length; i += 255) {
+          const chunk = subBlocks.slice(i, i + 255);
+          this.buffer.push(chunk.length);
+          for (let b of chunk) this.buffer.push(b);
+        }
+        this.buffer.push(0x00); // 終端
+      }
+
+      finish() {
+        this.buffer.push(0x3B); // GIF終端記号
+        return new Uint8Array(this.buffer);
+      }
+    }
+
+    // --- エディター本体 ---
     let cols = 16;
     let rows = 16;
     let pixelScale = 20;
@@ -346,11 +468,9 @@
     let playInterval = null;
 
     let currentZoom = 1.0;
-    let panX = 0;
-    let panY = 0;
+    let panX = 0, panY = 0;
     let isPanning = false;
-    let startPanX = 0;
-    let startPanY = 0;
+    let startPanX = 0, startPanY = 0;
     let isSpacePressed = false;
 
     const wrapper = document.getElementById('canvas-wrapper');
@@ -366,9 +486,7 @@
 
     function initEditor() {
       updateCanvasDimensions();
-      if (frames.length === 0) {
-        frames.push(createEmptyFrame());
-      }
+      if (frames.length === 0) frames.push(createEmptyFrame());
       render();
       drawGrid();
     }
@@ -453,7 +571,6 @@
       hoverCtx.strokeStyle = '#6366f1';
       hoverCtx.lineWidth = 2;
       hoverCtx.strokeRect(col * pixelScale, row * pixelScale, pixelScale, pixelScale);
-
       hoverCtx.fillStyle = 'rgba(99, 102, 241, 0.25)';
       hoverCtx.fillRect(col * pixelScale, row * pixelScale, pixelScale, pixelScale);
     }
@@ -494,7 +611,6 @@
         mainCanvas.setPointerCapture(e.pointerId);
         return;
       }
-
       if (e.button === 0) {
         isDrawing = true;
         mainCanvas.setPointerCapture(e.pointerId);
@@ -503,20 +619,12 @@
     });
 
     mainCanvas.addEventListener('pointermove', handlePointer);
-
     mainCanvas.addEventListener('pointerup', (e) => {
-      if (isPanning) {
-        isPanning = false;
-        mainCanvas.releasePointerCapture(e.pointerId);
-        return;
-      }
+      isPanning = false;
       isDrawing = false;
-      mainCanvas.releasePointerCapture(e.pointerId);
+      try { mainCanvas.releasePointerCapture(e.pointerId); } catch(err){}
     });
-
-    mainCanvas.addEventListener('pointerleave', () => {
-      hoverCtx.clearRect(0, 0, hoverCanvas.width, hoverCanvas.height);
-    });
+    mainCanvas.addEventListener('pointerleave', () => hoverCtx.clearRect(0, 0, hoverCanvas.width, hoverCanvas.height));
 
     window.addEventListener('keydown', (e) => {
       if (e.code === 'Space' && !isSpacePressed) {
@@ -643,7 +751,6 @@
     function shiftFrameData(dx, dy) {
       const current = frames[currentFrameIndex];
       const shifted = createEmptyFrame();
-
       for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
           if (current[r] && current[r][c]) {
@@ -653,7 +760,6 @@
           }
         }
       }
-
       frames[currentFrameIndex] = shifted;
       render();
     }
@@ -665,14 +771,12 @@
 
     document.getElementById('onionToggle').onchange = render;
 
-    // 再生ボタン
     document.getElementById('playBtn').onclick = (e) => {
       isPlaying = !isPlaying;
       if (isPlaying) {
         e.target.textContent = "⏹ 停止";
         e.target.className = "danger";
         hoverCtx.clearRect(0, 0, hoverCanvas.width, hoverCanvas.height);
-        
         const delay = parseInt(document.getElementById('frameDelayInput').value) || 200;
         playInterval = setInterval(() => {
           currentFrameIndex = (currentFrameIndex + 1) % frames.length;
@@ -694,30 +798,24 @@
       link.click();
     };
 
-    // --- GIF アニメーション書き出し ---
+    // --- 完全内蔵 GIF 保存処理 ---
     document.getElementById('downloadGifBtn').onclick = () => {
-      if (typeof omggif === 'undefined') {
-        alert("GIF生成ライブラリの読み込みに失敗しました。");
-        return;
-      }
-
       const btn = document.getElementById('downloadGifBtn');
-      btn.textContent = "GIF作成中...";
+      btn.textContent = "GIF生成中...";
       btn.disabled = true;
 
       const delayMs = parseInt(document.getElementById('frameDelayInput').value) || 200;
-      const gifDelay = Math.max(1, Math.round(delayMs / 10)); // GIF単位(1/100秒)に変換
+      const isTransparent = document.getElementById('transparentToggle').checked;
 
       setTimeout(() => {
         try {
+          const encoder = new SimpleGifEncoder(cols, rows, delayMs);
+          encoder.start();
+
           const tempCanvas = document.createElement('canvas');
           tempCanvas.width = cols;
           tempCanvas.height = rows;
           const tempCtx = tempCanvas.getContext('2d');
-          const isTransparent = document.getElementById('transparentToggle').checked;
-
-          const buffer = new Uint8Array(cols * rows * frames.length * 5);
-          const gifWriter = new omggif.GifWriter(buffer, cols, rows, { loop: 0 });
 
           frames.forEach((frameData) => {
             tempCtx.clearRect(0, 0, cols, rows);
@@ -726,43 +824,11 @@
               tempCtx.fillRect(0, 0, cols, rows);
             }
             drawFrameData(tempCtx, frameData, 1);
-
-            const imgData = tempCtx.getImageData(0, 0, cols, rows);
-            const paletteMap = new Map();
-            const palette = [0x00000000];
-            const pixels = [];
-
-            for (let i = 0; i < imgData.data.length; i += 4) {
-              const r = imgData.data[i];
-              const g = imgData.data[i + 1];
-              const b = imgData.data[i + 2];
-              const a = imgData.data[i + 3];
-
-              if (a < 128) {
-                pixels.push(0);
-              } else {
-                const rgb = (r << 16) | (g << 8) | b;
-                if (!paletteMap.has(rgb)) {
-                  paletteMap.set(rgb, palette.length);
-                  palette.push(rgb);
-                }
-                pixels.push(paletteMap.get(rgb));
-              }
-            }
-
-            let pow2 = 2;
-            while (pow2 < palette.length && pow2 < 256) pow2 <<= 1;
-            while (palette.length < pow2) palette.push(0);
-
-            gifWriter.addFrame(0, 0, cols, rows, pixels, {
-              palette: palette,
-              delay: gifDelay,
-              transparent: 0
-            });
+            encoder.addFrame(tempCtx, isTransparent);
           });
 
-          const gifData = buffer.subarray(0, gifWriter.end());
-          const blob = new Blob([gifData], { type: 'image/gif' });
+          const gifBytes = encoder.finish();
+          const blob = new Blob([gifBytes], { type: 'image/gif' });
           const url = URL.createObjectURL(blob);
 
           const link = document.createElement('a');
@@ -771,99 +837,17 @@
           link.click();
 
         } catch (err) {
-          alert("GIF保存エラー: " + err.message);
+          alert("GIF出力エラー: " + err.message);
           console.error(err);
         } finally {
-          btn.textContent = "👾 スマホ・Discord用 (GIF保存)";
+          btn.textContent = "👾 GIFアニメ保存 (確実動作)";
           btn.disabled = false;
         }
       }, 50);
     };
 
-    // APNG書き出し
-    document.getElementById('downloadApngBtn').onclick = () => {
-      if (typeof UPNG === 'undefined') {
-        alert("ライブラリの読み込みに失敗しました。");
-        return;
-      }
-
-      const delayMs = parseInt(document.getElementById('frameDelayInput').value) || 200;
-
-      const tempCanvas = document.createElement('canvas');
-      tempCanvas.width = cols;
-      tempCanvas.height = rows;
-      const tempCtx = tempCanvas.getContext('2d');
-      const isTransparent = document.getElementById('transparentToggle').checked;
-
-      const imgBuffers = [];
-      const delays = [];
-
-      frames.forEach((frameData) => {
-        tempCtx.clearRect(0, 0, cols, rows);
-        if (!isTransparent) {
-          tempCtx.fillStyle = '#ffffff';
-          tempCtx.fillRect(0, 0, cols, rows);
-        }
-        drawFrameData(tempCtx, frameData, 1);
-
-        const imgData = tempCtx.getImageData(0, 0, cols, rows);
-        imgBuffers.push(imgData.data.buffer);
-        delays.push(delayMs);
-      });
-
-      const apngBuffer = UPNG.encode(imgBuffers, cols, rows, 0, delays);
-      const blob = new Blob([apngBuffer], { type: 'image/png' });
-      const url = URL.createObjectURL(blob);
-
-      const link = document.createElement('a');
-      link.download = `pixel_animation_${cols}x${rows}.png`;
-      link.href = url;
-      link.click();
-    };
-
-    // WebM動画書き出し
-    document.getElementById('downloadWebmBtn').onclick = () => {
-      try {
-        const stream = mainCanvas.captureStream(30);
-        let options = { mimeType: 'video/webm' };
-        if (!MediaRecorder.isTypeSupported('video/webm')) {
-          options = { mimeType: 'video/mp4' };
-        }
-
-        const recorder = new MediaRecorder(stream, options);
-        const chunks = [];
-        const delayMs = parseInt(document.getElementById('frameDelayInput').value) || 200;
-
-        recorder.ondataavailable = e => chunks.push(e.data);
-        recorder.onstop = () => {
-          const blob = new Blob(chunks, { type: recorder.mimeType });
-          const url = URL.createObjectURL(blob);
-          const link = document.createElement('a');
-          link.href = url;
-          link.download = `pixel_animation_${cols}x${rows}.${recorder.mimeType.includes('mp4') ? 'mp4' : 'webm'}`;
-          link.click();
-        };
-
-        recorder.start();
-
-        let count = 0;
-        const recordInterval = setInterval(() => {
-          currentFrameIndex = count;
-          render();
-          count++;
-          if (count >= frames.length) {
-            clearInterval(recordInterval);
-            setTimeout(() => recorder.stop(), delayMs);
-          }
-        }, delayMs);
-
-      } catch (err) {
-        alert("動画の保存に対応していないブラウザです。");
-      }
-    };
-
+    // パネルドラッグ＆リサイズ処理
     let topZIndex = 100;
-
     function makeDraggableAndResizable(panel) {
       const header = panel.querySelector('.panel-header');
       let isDragging = false;
@@ -887,28 +871,16 @@
         const rect = panel.getBoundingClientRect();
         initialLeft = rect.left;
         initialTop = rect.top;
-
         topZIndex++;
         panel.style.zIndex = topZIndex;
       }
 
       function moveDrag(clientX, clientY) {
         if (!isDragging) return;
-
-        const deltaX = clientX - startX;
-        const deltaY = clientY - startY;
-
-        let newLeft = initialLeft + deltaX;
-        let newTop = initialTop + deltaY;
-
-        const maxLeft = window.innerWidth - panel.offsetWidth;
-        const maxTop = window.innerHeight - panel.offsetHeight;
-
-        newLeft = Math.max(0, Math.min(newLeft, maxLeft));
-        newTop = Math.max(0, Math.min(newTop, maxTop));
-
-        panel.style.left = `${newLeft}px`;
-        panel.style.top = `${newTop}px`;
+        let newLeft = initialLeft + (clientX - startX);
+        let newTop = initialTop + (clientY - startY);
+        panel.style.left = `${Math.max(0, Math.min(newLeft, window.innerWidth - panel.offsetWidth))}px`;
+        panel.style.top = `${Math.max(0, Math.min(newTop, window.innerHeight - panel.offsetHeight))}px`;
         panel.style.right = 'auto';
         panel.style.bottom = 'auto';
       }
@@ -916,7 +888,9 @@
       function endDrag() {
         if (isDragging) {
           isDragging = false;
-          savePanelLayout(panel);
+          localStorage.setItem(`panel_layout_${panel.id}`, JSON.stringify({
+            left: panel.style.left, top: panel.style.top, width: panel.style.width, height: panel.style.height
+          }));
         }
       }
 
@@ -924,32 +898,9 @@
       document.addEventListener('mousemove', (e) => moveDrag(e.clientX, e.clientY));
       document.addEventListener('mouseup', endDrag);
 
-      header.addEventListener('touchstart', (e) => {
-        const touch = e.touches[0];
-        startDrag(touch.clientX, touch.clientY);
-      }, { passive: true });
-
-      document.addEventListener('touchmove', (e) => {
-        if (!isDragging) return;
-        const touch = e.touches[0];
-        moveDrag(touch.clientX, touch.clientY);
-      }, { passive: true });
-
+      header.addEventListener('touchstart', (e) => startDrag(e.touches[0].clientX, e.touches[0].clientY), { passive: true });
+      document.addEventListener('touchmove', (e) => moveDrag(e.touches[0].clientX, e.touches[0].clientY), { passive: true });
       document.addEventListener('touchend', endDrag);
-
-      const resizeObserver = new ResizeObserver(() => {
-        savePanelLayout(panel);
-      });
-      resizeObserver.observe(panel);
-    }
-
-    function savePanelLayout(panel) {
-      localStorage.setItem(`panel_layout_${panel.id}`, JSON.stringify({
-        left: panel.style.left,
-        top: panel.style.top,
-        width: panel.style.width,
-        height: panel.style.height
-      }));
     }
 
     document.querySelectorAll('.draggable-panel').forEach(makeDraggableAndResizable);
