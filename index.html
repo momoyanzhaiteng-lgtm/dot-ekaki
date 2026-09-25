@@ -3,10 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>ドット絵エディター</title>
-  <!-- 安定したAPNG・PNGエンコーダーライブラリ -->
+  <title>ドットエディター</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/upng-js@2.1.0/UPNG.min.js"></script>
+  <!-- GIF出力用ライブラリ -->
+  <script src="https://cdn.jsdelivr.net/npm/omggif@1.0.10/omggif.min.js"></script>
   <style>
     :root {
       --bg-color: #1a1a24;
@@ -73,13 +74,8 @@
       background-color: #ffffff;
     }
 
-    #canvas-wrapper.panning {
-      cursor: grab !important;
-    }
-
-    #canvas-wrapper.panning:active {
-      cursor: grabbing !important;
-    }
+    #canvas-wrapper.panning { cursor: grab !important; }
+    #canvas-wrapper.panning:active { cursor: grabbing !important; }
 
     canvas {
       position: absolute;
@@ -122,10 +118,6 @@
       touch-action: none;
     }
 
-    .panel-header:hover {
-      background: #41415a;
-    }
-
     .panel-body {
       padding: 10px;
       display: flex;
@@ -148,7 +140,7 @@
     }
 
     input[type="number"] {
-      width: 50px;
+      width: 55px;
       background: #1e1e28;
       border: 1px solid var(--border-color);
       color: #fff;
@@ -226,7 +218,7 @@
     #panel-size { top: 20px; left: 20px; width: 220px; }
     #panel-tools { top: 150px; left: 20px; width: 200px; }
     #panel-color { top: 20px; right: 20px; width: 200px; }
-    #panel-anim { bottom: 20px; left: 20px; width: 220px; }
+    #panel-anim { bottom: 20px; left: 20px; width: 230px; }
     #panel-view { bottom: 20px; right: 20px; width: 220px; }
   </style>
 </head>
@@ -287,6 +279,13 @@
         <span id="frameIndicator" style="font-weight: bold; font-size: 0.8rem;">コマ: 1 / 1</span>
         <label><input type="checkbox" id="onionToggle" checked> 前コマ透過</label>
       </div>
+      
+      <!-- 速度設定（ミリ秒） -->
+      <div class="row" style="justify-content: space-between;">
+        <label>速度(ms): <input type="number" id="frameDelayInput" value="200" min="20" max="2000" step="10"></label>
+        <span style="font-size:0.7rem; color:#aaa;">(大きい＝遅い)</span>
+      </div>
+
       <div class="btn-group">
         <button id="prevFrameBtn">◀ 前</button>
         <button id="nextFrameBtn">次 ▶</button>
@@ -324,12 +323,12 @@
         <button id="zoomResetBtn">100%</button>
         <button id="zoomOutBtn">🔍ー</button>
       </div>
-      <button id="downloadBtn" class="primary" style="width: 100%;">💾 コマ(PNG保存)</button>
+      <button id="downloadGifBtn" class="primary" style="background:#d97706; width:100%;">👾 スマホ・Discord用 (GIF保存)</button>
       <div class="btn-group" style="margin-top: 4px;">
-        <button id="downloadApngBtn" class="primary" style="background:#059669;">🎬 アニメ(APNG)</button>
-        <button id="downloadWebmBtn" class="primary" style="background:#2563eb;">🎥 動画(WebM)</button>
+        <button id="downloadApngBtn" style="background:#059669;">🎬 APNG</button>
+        <button id="downloadWebmBtn" style="background:#2563eb;">🎥 WebM</button>
       </div>
-      <button id="resetLayoutBtn" style="font-size: 0.65rem; background:#222; margin-top: 4px;">UI配置リセット</button>
+      <button id="downloadBtn" style="background:#4b5563; margin-top:4px;">💾 1コマ(PNG)</button>
     </div>
   </div>
 
@@ -666,16 +665,19 @@
 
     document.getElementById('onionToggle').onchange = render;
 
+    // 再生ボタン
     document.getElementById('playBtn').onclick = (e) => {
       isPlaying = !isPlaying;
       if (isPlaying) {
         e.target.textContent = "⏹ 停止";
         e.target.className = "danger";
         hoverCtx.clearRect(0, 0, hoverCanvas.width, hoverCanvas.height);
+        
+        const delay = parseInt(document.getElementById('frameDelayInput').value) || 200;
         playInterval = setInterval(() => {
           currentFrameIndex = (currentFrameIndex + 1) % frames.length;
           render();
-        }, 150);
+        }, delay);
       } else {
         e.target.textContent = "▶ 再生";
         e.target.className = "primary";
@@ -692,16 +694,19 @@
       link.click();
     };
 
-    // --- 安全・確実な APNG（アニメーションPNG）書き出し ---
-    document.getElementById('downloadApngBtn').onclick = () => {
-      if (typeof UPNG === 'undefined') {
-        alert("ライブラリの読み込みに失敗しました。ネット接続を確認してください。");
+    // --- GIF アニメーション書き出し ---
+    document.getElementById('downloadGifBtn').onclick = () => {
+      if (typeof omggif === 'undefined') {
+        alert("GIF生成ライブラリの読み込みに失敗しました。");
         return;
       }
 
-      const btn = document.getElementById('downloadApngBtn');
-      btn.textContent = "書き出し中...";
+      const btn = document.getElementById('downloadGifBtn');
+      btn.textContent = "GIF作成中...";
       btn.disabled = true;
+
+      const delayMs = parseInt(document.getElementById('frameDelayInput').value) || 200;
+      const gifDelay = Math.max(1, Math.round(delayMs / 10)); // GIF単位(1/100秒)に変換
 
       setTimeout(() => {
         try {
@@ -711,8 +716,8 @@
           const tempCtx = tempCanvas.getContext('2d');
           const isTransparent = document.getElementById('transparentToggle').checked;
 
-          const imgBuffers = [];
-          const delays = [];
+          const buffer = new Uint8Array(cols * rows * frames.length * 5);
+          const gifWriter = new omggif.GifWriter(buffer, cols, rows, { loop: 0 });
 
           frames.forEach((frameData) => {
             tempCtx.clearRect(0, 0, cols, rows);
@@ -723,43 +728,111 @@
             drawFrameData(tempCtx, frameData, 1);
 
             const imgData = tempCtx.getImageData(0, 0, cols, rows);
-            imgBuffers.push(imgData.data.buffer);
-            delays.push(150);
+            const paletteMap = new Map();
+            const palette = [0x00000000];
+            const pixels = [];
+
+            for (let i = 0; i < imgData.data.length; i += 4) {
+              const r = imgData.data[i];
+              const g = imgData.data[i + 1];
+              const b = imgData.data[i + 2];
+              const a = imgData.data[i + 3];
+
+              if (a < 128) {
+                pixels.push(0);
+              } else {
+                const rgb = (r << 16) | (g << 8) | b;
+                if (!paletteMap.has(rgb)) {
+                  paletteMap.set(rgb, palette.length);
+                  palette.push(rgb);
+                }
+                pixels.push(paletteMap.get(rgb));
+              }
+            }
+
+            let pow2 = 2;
+            while (pow2 < palette.length && pow2 < 256) pow2 <<= 1;
+            while (palette.length < pow2) palette.push(0);
+
+            gifWriter.addFrame(0, 0, cols, rows, pixels, {
+              palette: palette,
+              delay: gifDelay,
+              transparent: 0
+            });
           });
 
-          const apngBuffer = UPNG.encode(imgBuffers, cols, rows, 0, delays);
-          const blob = new Blob([apngBuffer], { type: 'image/png' });
+          const gifData = buffer.subarray(0, gifWriter.end());
+          const blob = new Blob([gifData], { type: 'image/gif' });
           const url = URL.createObjectURL(blob);
 
           const link = document.createElement('a');
-          link.download = `pixel_animation_${cols}x${rows}.png`;
+          link.download = `pixel_animation_${cols}x${rows}.gif`;
           link.href = url;
           link.click();
+
         } catch (err) {
-          alert("APNGの保存に失敗しました: " + err.message);
+          alert("GIF保存エラー: " + err.message);
           console.error(err);
         } finally {
-          btn.textContent = "🎬 アニメ(APNG)";
+          btn.textContent = "👾 スマホ・Discord用 (GIF保存)";
           btn.disabled = false;
         }
       }, 50);
     };
 
-    // --- WebM動画形式書き出し ---
-    document.getElementById('downloadWebmBtn').onclick = () => {
-      const btn = document.getElementById('downloadWebmBtn');
-      btn.textContent = "録画中...";
-      btn.disabled = true;
+    // APNG書き出し
+    document.getElementById('downloadApngBtn').onclick = () => {
+      if (typeof UPNG === 'undefined') {
+        alert("ライブラリの読み込みに失敗しました。");
+        return;
+      }
 
+      const delayMs = parseInt(document.getElementById('frameDelayInput').value) || 200;
+
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = cols;
+      tempCanvas.height = rows;
+      const tempCtx = tempCanvas.getContext('2d');
+      const isTransparent = document.getElementById('transparentToggle').checked;
+
+      const imgBuffers = [];
+      const delays = [];
+
+      frames.forEach((frameData) => {
+        tempCtx.clearRect(0, 0, cols, rows);
+        if (!isTransparent) {
+          tempCtx.fillStyle = '#ffffff';
+          tempCtx.fillRect(0, 0, cols, rows);
+        }
+        drawFrameData(tempCtx, frameData, 1);
+
+        const imgData = tempCtx.getImageData(0, 0, cols, rows);
+        imgBuffers.push(imgData.data.buffer);
+        delays.push(delayMs);
+      });
+
+      const apngBuffer = UPNG.encode(imgBuffers, cols, rows, 0, delays);
+      const blob = new Blob([apngBuffer], { type: 'image/png' });
+      const url = URL.createObjectURL(blob);
+
+      const link = document.createElement('a');
+      link.download = `pixel_animation_${cols}x${rows}.png`;
+      link.href = url;
+      link.click();
+    };
+
+    // WebM動画書き出し
+    document.getElementById('downloadWebmBtn').onclick = () => {
       try {
         const stream = mainCanvas.captureStream(30);
         let options = { mimeType: 'video/webm' };
         if (!MediaRecorder.isTypeSupported('video/webm')) {
-          options = { mimeType: 'video/mp4' }; // iOS Safariフォールバック
+          options = { mimeType: 'video/mp4' };
         }
 
         const recorder = new MediaRecorder(stream, options);
         const chunks = [];
+        const delayMs = parseInt(document.getElementById('frameDelayInput').value) || 200;
 
         recorder.ondataavailable = e => chunks.push(e.data);
         recorder.onstop = () => {
@@ -769,9 +842,6 @@
           link.href = url;
           link.download = `pixel_animation_${cols}x${rows}.${recorder.mimeType.includes('mp4') ? 'mp4' : 'webm'}`;
           link.click();
-
-          btn.textContent = "🎥 動画(WebM)";
-          btn.disabled = false;
         };
 
         recorder.start();
@@ -783,15 +853,12 @@
           count++;
           if (count >= frames.length) {
             clearInterval(recordInterval);
-            setTimeout(() => recorder.stop(), 150);
+            setTimeout(() => recorder.stop(), delayMs);
           }
-        }, 150);
+        }, delayMs);
 
       } catch (err) {
-        alert("動画の保存に対応していないブラウザです。APNG保存をお試しください。");
-        console.error(err);
-        btn.textContent = "🎥 動画(WebM)";
-        btn.disabled = false;
+        alert("動画の保存に対応していないブラウザです。");
       }
     };
 
@@ -886,13 +953,6 @@
     }
 
     document.querySelectorAll('.draggable-panel').forEach(makeDraggableAndResizable);
-
-    document.getElementById('resetLayoutBtn').onclick = () => {
-      document.querySelectorAll('.draggable-panel').forEach(panel => {
-        localStorage.removeItem(`panel_layout_${panel.id}`);
-      });
-      location.reload();
-    };
 
     initEditor();
     initPalette();
