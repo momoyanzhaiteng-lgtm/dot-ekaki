@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>ドット絵エディター</title>
+  <style>
+    :root {
+      --bg-color: #1a1a24;
+      --panel-bg: #272736;
+      --panel-header-bg: #353549;
+      --accent-color: #6366f1;
+      --accent-hover: #4f46e5;
+      --text-color: #f3f4f6;
+      --border-color: #3f3f56;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      touch-action: manipulation;
+      user-select: none;
+    }
+
+    body {
+      background-color: var(--bg-color);
+      color: var(--text-color);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* ワークスペース（キャンバス移動の親領域） */
+    #workspace {
+      width: 100%;
+      height: 100%;
+      position: absolute;
+      top: 0;
+      left: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      cursor: default;
+    }
+
+    /* 描画枠コンテナ（移動・拡大の対象） */
+    #canvas-wrapper {
+      position: absolute;
+      border: 2px solid var(--accent-color);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+      transform-origin: center center;
+      touch-action: none;
+      cursor: crosshair;
+    }
+
+    /* 透過チェッカー柄背景 */
+    .transparent-bg {
+      background-image: 
+        linear-gradient(45deg, #ccc 25%, transparent 25%), 
+        linear-gradient(-45deg, #ccc 25%, transparent 25%), 
+        linear-gradient(45deg, transparent 75%, #ccc 75%), 
+        linear-gradient(-45deg, transparent 75%, #ccc 75%);
+      background-size: 16px 16px;
+      background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
+      background-color: #ffffff;
+    }
+
+    .opaque-bg {
+      background-color: #ffffff;
+    }
+
+    #canvas-wrapper.panning {
+      cursor: grab !important;
+    }
+
+    #canvas-wrapper.panning:active {
+      cursor: grabbing !important;
+    }
+
+    canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      image-rendering: pixelated;
+    }
+
+    #onionCanvas { opacity: 0.35; pointer-events: none; }
+    #gridCanvas, #hoverCanvas { pointer-events: none; }
+
+    /* 可動・リサイズ対応パネル（フローティングUI） */
+    .draggable-panel {
+      position: absolute;
+      background: var(--panel-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+      z-index: 100;
+      min-width: 180px;
+      min-height: 120px;
+      resize: both; /* ドラッグでサイズ変更可能にするCSS */
+      overflow: auto; /* リサイズ用ハンドルを表示 */
+    }
+
+    .panel-header {
+      padding: 8px 12px;
+      background: var(--panel-header-bg);
+      border-top-left-radius: 7px;
+      border-top-right-radius: 7px;
+      cursor: move;
+      font-size: 0.8rem;
+      font-weight: bold;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid var(--border-color);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    .panel-header:hover {
+      background: #41415a;
+    }
+
+    .panel-body {
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    /* UIパーツ設定 */
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    label {
+      font-size: 0.75rem;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    input[type="number"] {
+      width: 50px;
+      background: #1e1e28;
+      border: 1px solid var(--border-color);
+      color: #fff;
+      padding: 4px;
+      border-radius: 4px;
+      text-align: center;
+    }
+
+    input[type="color"] {
+      border: none;
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      cursor: pointer;
+      background: transparent;
+    }
+
+    button {
+      background: #38384a;
+      color: #fff;
+      border: none;
+      padding: 6px 10px;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: bold;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    button:hover { background: #4a4a62; }
+    button.primary { background: var(--accent-color); }
+    button.primary:hover { background: var(--accent-hover); }
+    button.danger { background: #991b1b; }
+
+    .btn-group {
+      display: flex;
+      gap: 4px;
+      width: 100%;
+    }
+
+    .btn-group button { flex: 1; }
+
+    /* 十字移動キー用レイアウト */
+    .shift-pad {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 2px;
+      width: 100%;
+      margin-top: 4px;
+    }
+    .shift-pad button {
+      padding: 4px;
+      font-size: 0.8rem;
+    }
+
+    /* パレット設定 */
+    .palette-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(28px, 1fr));
+      gap: 4px;
+      margin-top: 4px;
+    }
+
+    .palette-color {
+      width: 28px;
+      height: 28px;
+      border-radius: 4px;
+      border: 2px solid #555;
+      cursor: pointer;
+    }
+
+    .palette-color.selected {
+      border-color: #fff;
+      transform: scale(1.1);
+    }
+
+    /* パネルのデフォルト位置設定 */
+    #panel-size { top: 20px; left: 20px; width: 220px; }
+    #panel-tools { top: 150px; left: 20px; width: 200px; }
+    #panel-color { top: 20px; right: 20px; width: 200px; }
+    #panel-anim { bottom: 20px; left: 20px; width: 220px; }
+    #panel-view { bottom: 20px; right: 20px; width: 220px; }
+  </style>
+</head>
+<body>
+
+  <!-- メインワークスペース（背景キャンバス） -->
+  <div id="workspace">
+    <div id="canvas-wrapper" class="transparent-bg">
+      <canvas id="onionCanvas"></canvas>
+      <canvas id="mainCanvas"></canvas>
+      <canvas id="gridCanvas"></canvas>
+      <canvas id="hoverCanvas"></canvas>
+    </div>
+  </div>
+
+  <!-- パネル 1: 描画サイズ・背景設定 -->
+  <div id="panel-size" class="draggable-panel">
+    <div class="panel-header">📐 描画サイズ & 背景</div>
+    <div class="panel-body">
+      <div class="row">
+        <label>幅: <input type="number" id="gridW" value="16" min="4" max="128"></label>
+        <label>高: <input type="number" id="gridH" value="16" min="4" max="128"></label>
+        <button id="applySizeBtn" class="primary">適用</button>
+      </div>
+      <div class="row">
+        <label><input type="checkbox" id="transparentToggle" checked> 背景を透過する</label>
+      </div>
+    </div>
+  </div>
+
+  <!-- パネル 2: 描画ツール -->
+  <div id="panel-tools" class="draggable-panel">
+    <div class="panel-header">✏️ ツール</div>
+    <div class="panel-body">
+      <div class="btn-group">
+        <button id="penBtn" class="primary">ペン</button>
+        <button id="eraserBtn">消しゴム</button>
+      </div>
+      <div class="row">
+        <label><input type="checkbox" id="gridToggle" checked> グリッド表示</label>
+      </div>
+      <button id="clearBtn" class="danger">クリア</button>
+    </div>
+  </div>
+
+  <!-- パネル 3: カラー & パレット -->
+  <div id="panel-color" class="draggable-panel">
+    <div class="panel-header">🎨 カラーパレット</div>
+    <div class="panel-body">
+      <div class="row" style="justify-content: space-between;">
+        <label>描画色:</label>
+        <input type="color" id="colorPicker" value="#000000">
+      </div>
+      <div class="palette-grid" id="paletteGrid"></div>
+    </div>
+  </div>
+
+  <!-- パネル 4: アニメーション作成 -->
+  <div id="panel-anim" class="draggable-panel">
+    <div class="panel-header">🎬 アニメーション</div>
+    <div class="panel-body">
+      <div class="row" style="justify-content: space-between;">
+        <span id="frameIndicator" style="font-weight: bold; font-size: 0.8rem;">コマ: 1 / 1</span>
+        <label><input type="checkbox" id="onionToggle" checked> 前コマ透過</label>
+      </div>
+      <div class="btn-group">
+        <button id="prevFrameBtn">◀ 前</button>
+        <button id="nextFrameBtn">次 ▶</button>
+      </div>
+      <div class="btn-group">
+        <button id="addFrameBtn">＋ 新規</button>
+        <button id="copyFrameBtn" class="primary">📋 複製</button>
+      </div>
+
+      <!-- 1px 上下左右移動コントローラー -->
+      <label style="margin-top: 4px; font-weight: bold;">↔ 1px位置調整</label>
+      <div class="shift-pad">
+        <div></div>
+        <button id="shiftUpBtn">▲</button>
+        <div></div>
+        <button id="shiftLeftBtn">◀</button>
+        <div></div>
+        <button id="shiftRightBtn">▶</button>
+        <div></div>
+        <button id="shiftDownBtn">▼</button>
+        <div></div>
+      </div>
+
+      <div class="btn-group" style="margin-top: 4px;">
+        <button id="playBtn" class="primary">▶ 再生</button>
+        <button id="deleteFrameBtn" class="danger">コマ削除</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- パネル 5: ズーム & UI操作 -->
+  <div id="panel-view" class="draggable-panel">
+    <div class="panel-header">🔍 ズーム & 保存</div>
+    <div class="panel-body">
+      <div class="btn-group">
+        <button id="zoomInBtn">🔍＋</button>
+        <button id="zoomResetBtn">100%</button>
+        <button id="zoomOutBtn">🔍ー</button>
+      </div>
+      <button id="downloadBtn" class="primary">💾 PNG保存</button>
+      <button id="resetLayoutBtn" style="font-size: 0.65rem; background:#222;">UI配置リセット</button>
+    </div>
+  </div>
+
+  <script>
+    // --- 状態管理変数 ---
+    let cols = 16;
+    let rows = 16;
+    let pixelScale = 20;
+
+    let frames = [];
+    let currentFrameIndex = 0;
+
+    let isDrawing = false;
+    let isEraser = false;
+    let isPlaying = false;
+    let playInterval = null;
+
+    let currentZoom = 1.0;
+    let panX = 0;
+    let panY = 0;
+    let isPanning = false;
+    let startPanX = 0;
+    let startPanY = 0;
+    let isSpacePressed = false;
+
+    // --- DOM要素 ---
+    const wrapper = document.getElementById('canvas-wrapper');
+    const mainCanvas = document.getElementById('mainCanvas');
+    const onionCanvas = document.getElementById('onionCanvas');
+    const gridCanvas = document.getElementById('gridCanvas');
+    const hoverCanvas = document.getElementById('hoverCanvas');
+
+    const mainCtx = mainCanvas.getContext('2d');
+    const onionCtx = onionCanvas.getContext('2d');
+    const gridCtx = gridCanvas.getContext('2d');
+    const hoverCtx = hoverCanvas.getContext('2d');
+
+    // --- 初期化 ---
+    function initEditor() {
+      updateCanvasDimensions();
+      if (frames.length === 0) {
+        frames.push(createEmptyFrame());
+      }
+      render();
+      drawGrid();
+    }
+
+    function createEmptyFrame() {
+      return Array(rows).fill(null).map(() => Array(cols).fill(null));
+    }
+
+    function updateCanvasDimensions() {
+      const renderW = cols * pixelScale;
+      const renderH = rows * pixelScale;
+
+      wrapper.style.width = `${renderW}px`;
+      wrapper.style.height = `${renderH}px`;
+
+      [mainCanvas, onionCanvas, gridCanvas, hoverCanvas].forEach(c => {
+        c.width = renderW;
+        c.height = renderH;
+        c.style.width = `${renderW}px`;
+        c.style.height = `${renderH}px`;
+      });
+
+      applyTransform();
+    }
+
+    // --- 描画処理 ---
+    function render() {
+      mainCtx.clearRect(0, 0, mainCanvas.width, mainCanvas.height);
+      onionCtx.clearRect(0, 0, onionCanvas.width, onionCanvas.height);
+
+      if (!document.getElementById('transparentToggle').checked) {
+        mainCtx.fillStyle = '#ffffff';
+        mainCtx.fillRect(0, 0, mainCanvas.width, mainCanvas.height);
+      }
+
+      const showOnion = document.getElementById('onionToggle').checked;
+      if (showOnion && currentFrameIndex > 0 && !isPlaying) {
+        drawFrameData(onionCtx, frames[currentFrameIndex - 1]);
+      }
+
+      drawFrameData(mainCtx, frames[currentFrameIndex]);
+      document.getElementById('frameIndicator').textContent = `コマ: ${currentFrameIndex + 1} / ${frames.length}`;
+    }
+
+    function drawFrameData(ctx, frameData) {
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          if (frameData[r] && frameData[r][c]) {
+            ctx.fillStyle = frameData[r][c];
+            ctx.fillRect(c * pixelScale, r * pixelScale, pixelScale, pixelScale);
+          }
+        }
+      }
+    }
+
+    function drawGrid() {
+      gridCtx.clearRect(0, 0, gridCanvas.width, gridCanvas.height);
+      if (!document.getElementById('gridToggle').checked) return;
+
+      gridCtx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
+      gridCtx.lineWidth = 1;
+
+      for (let c = 0; c <= cols; c++) {
+        gridCtx.beginPath();
+        gridCtx.moveTo(c * pixelScale, 0);
+        gridCtx.lineTo(c * pixelScale, gridCanvas.height);
+        gridCtx.stroke();
+      }
+      for (let r = 0; r <= rows; r++) {
+        gridCtx.beginPath();
+        gridCtx.moveTo(0, r * pixelScale);
+        gridCtx.lineTo(gridCanvas.width, r * pixelScale);
+        gridCtx.stroke();
+      }
+    }
+
+    function drawHover(col, row) {
+      hoverCtx.clearRect(0, 0, hoverCanvas.width, hoverCanvas.height);
+      if (col < 0 || col >= cols || row < 0 || row >= rows || isPlaying || isPanning) return;
+
+      hoverCtx.strokeStyle = '#6366f1';
+      hoverCtx.lineWidth = 2;
+      hoverCtx.strokeRect(col * pixelScale, row * pixelScale, pixelScale, pixelScale);
+
+      hoverCtx.fillStyle = 'rgba(99, 102, 241, 0.25)';
+      hoverCtx.fillRect(col * pixelScale, row * pixelScale, pixelScale, pixelScale);
+    }
+
+    // --- キャンバス操作 ---
+    function handlePointer(e) {
+      if (isPanning) {
+        panX += e.clientX - startPanX;
+        panY += e.clientY - startPanY;
+        startPanX = e.clientX;
+        startPanY = e.clientY;
+        applyTransform();
+        return;
+      }
+
+      const rect = mainCanvas.getBoundingClientRect();
+      const x = (e.clientX - rect.left) / currentZoom;
+      const y = (e.clientY - rect.top) / currentZoom;
+
+      const col = Math.floor(x / pixelScale);
+      const row = Math.floor(y / pixelScale);
+
+      drawHover(col, row);
+
+      if (isDrawing && !isPlaying) {
+        if (row >= 0 && row < rows && col >= 0 && col < cols) {
+          const color = isEraser ? null : document.getElementById('colorPicker').value;
+          frames[currentFrameIndex][row][col] = color;
+          render();
+        }
+      }
+    }
+
+    mainCanvas.addEventListener('pointerdown', (e) => {
+      if (e.button === 1 || isSpacePressed) {
+        isPanning = true;
+        startPanX = e.clientX;
+        startPanY = e.clientY;
+        mainCanvas.setPointerCapture(e.pointerId);
+        return;
+      }
+
+      if (e.button === 0) {
+        isDrawing = true;
+        mainCanvas.setPointerCapture(e.pointerId);
+        handlePointer(e);
+      }
+    });
+
+    mainCanvas.addEventListener('pointermove', handlePointer);
+
+    mainCanvas.addEventListener('pointerup', (e) => {
+      if (isPanning) {
+        isPanning = false;
+        mainCanvas.releasePointerCapture(e.pointerId);
+        return;
+      }
+      isDrawing = false;
+      mainCanvas.releasePointerCapture(e.pointerId);
+    });
+
+    mainCanvas.addEventListener('pointerleave', () => {
+      hoverCtx.clearRect(0, 0, hoverCanvas.width, hoverCanvas.height);
+    });
+
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'Space' && !isSpacePressed) {
+        isSpacePressed = true;
+        wrapper.classList.add('panning');
+      }
+    });
+    window.addEventListener('keyup', (e) => {
+      if (e.code === 'Space') {
+        isSpacePressed = false;
+        wrapper.classList.remove('panning');
+      }
+    });
+
+    // --- ズーム ＆ 位置移動 ---
+    function applyTransform() {
+      wrapper.style.transform = `translate(${panX}px, ${panY}px) scale(${currentZoom})`;
+    }
+
+    function updateZoom(newZoom) {
+      currentZoom = Math.min(Math.max(newZoom, 0.2), 5.0);
+      applyTransform();
+    }
+
+    document.getElementById('zoomInBtn').onclick = () => updateZoom(currentZoom + 0.2);
+    document.getElementById('zoomOutBtn').onclick = () => updateZoom(currentZoom - 0.2);
+    document.getElementById('zoomResetBtn').onclick = () => { panX = 0; panY = 0; updateZoom(1.0); };
+
+    wrapper.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      updateZoom(currentZoom + (e.deltaY < 0 ? 0.15 : -0.15));
+    }, { passive: false });
+
+    // --- カラーパレット設定 ---
+    const defaultPalette = [
+      '#000000', '#ffffff', '#7f7f7f', '#c3c3c3',
+      '#880015', '#ed1c24', '#ff7f27', '#fff200',
+      '#22b14c', '#00a2e8', '#3f48cc', '#a349a4',
+      '#b97a57', '#ffaec9', '#b5e61d', '#99d9ea'
+    ];
+
+    function initPalette() {
+      const paletteGrid = document.getElementById('paletteGrid');
+      paletteGrid.innerHTML = '';
+      defaultPalette.forEach((color, idx) => {
+        const swatch = document.createElement('div');
+        swatch.className = `palette-color ${idx === 0 ? 'selected' : ''}`;
+        swatch.style.backgroundColor = color;
+        swatch.onclick = () => {
+          document.querySelectorAll('.palette-color').forEach(s => s.classList.remove('selected'));
+          swatch.classList.add('selected');
+          document.getElementById('colorPicker').value = color;
+          isEraser = false;
+          updateToolButtons();
+        };
+        paletteGrid.appendChild(swatch);
+      });
+    }
+
+    function updateToolButtons() {
+      document.getElementById('penBtn').className = !isEraser ? 'primary' : '';
+      document.getElementById('eraserBtn').className = isEraser ? 'primary' : '';
+    }
+
+    document.getElementById('penBtn').onclick = () => { isEraser = false; updateToolButtons(); };
+    document.getElementById('eraserBtn').onclick = () => { isEraser = true; updateToolButtons(); };
+    document.getElementById('clearBtn').onclick = () => {
+      if (confirm('現在のコマをクリアしますか？')) {
+        frames[currentFrameIndex] = createEmptyFrame();
+        render();
+      }
+    };
+
+    document.getElementById('gridToggle').onchange = drawGrid;
+    document.getElementById('transparentToggle').onchange = (e) => {
+      wrapper.className = e.target.checked ? 'transparent-bg' : 'opaque-bg';
+      render();
+    };
+
+    document.getElementById('applySizeBtn').onclick = () => {
+      const newW = parseInt(document.getElementById('gridW').value) || 16;
+      const newH = parseInt(document.getElementById('gridH').value) || 16;
+      if (confirm(`サイズを ${newW} × ${newH} に変更しますか？\n（キャンバスがリセットされます）`)) {
+        cols = newW;
+        rows = newH;
+        frames = [createEmptyFrame()];
+        currentFrameIndex = 0;
+        panX = 0; panY = 0; currentZoom = 1.0;
+        updateCanvasDimensions();
+        render();
+        drawGrid();
+      }
+    };
+
+    // --- アニメーション機能 ---
+    document.getElementById('addFrameBtn').onclick = () => {
+      frames.splice(currentFrameIndex + 1, 0, createEmptyFrame());
+      currentFrameIndex++;
+      render();
+    };
+
+    document.getElementById('copyFrameBtn').onclick = () => {
+      const copy = JSON.parse(JSON.stringify(frames[currentFrameIndex]));
+      frames.splice(currentFrameIndex + 1, 0, copy);
+      currentFrameIndex++;
+      render();
+    };
+
+    document.getElementById('deleteFrameBtn').onclick = () => {
+      if (frames.length <= 1) {
+        alert('これ以上コマを削除できません。');
+        return;
+      }
+      frames.splice(currentFrameIndex, 1);
+      if (currentFrameIndex >= frames.length) currentFrameIndex = frames.length - 1;
+      render();
+    };
+
+    document.getElementById('prevFrameBtn').onclick = () => {
+      if (currentFrameIndex > 0) { currentFrameIndex--; render(); }
+    };
+
+    document.getElementById('nextFrameBtn').onclick = () => {
+      if (currentFrameIndex < frames.length - 1) { currentFrameIndex++; render(); }
+    };
+
+    // --- 1px移動処理（シフト機能） ---
+    function shiftFrameData(dx, dy) {
+      const current = frames[currentFrameIndex];
+      const shifted = createEmptyFrame();
+
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          if (current[r][c]) {
+            const newR = (r + dy + rows) % rows;
+            const newC = (c + dx + cols) % cols;
+            shifted[newR][newC] = current[r][c];
+          }
+        }
+      }
+
+      frames[currentFrameIndex] = shifted;
+      render();
+    }
+
+    document.getElementById('shiftUpBtn').onclick = () => shiftFrameData(0, -1);
+    document.getElementById('shiftDownBtn').onclick = () => shiftFrameData(0, 1);
+    document.getElementById('shiftLeftBtn').onclick = () => shiftFrameData(-1, 0);
+    document.getElementById('shiftRightBtn').onclick = () => shiftFrameData(1, 0);
+
+    document.getElementById('onionToggle').onchange = render;
+
+    document.getElementById('playBtn').onclick = (e) => {
+      isPlaying = !isPlaying;
+      if (isPlaying) {
+        e.target.textContent = "⏹ 停止";
+        e.target.className = "danger";
+        hoverCtx.clearRect(0, 0, hoverCanvas.width, hoverCanvas.height);
+        playInterval = setInterval(() => {
+          currentFrameIndex = (currentFrameIndex + 1) % frames.length;
+          render();
+        }, 150);
+      } else {
+        e.target.textContent = "▶ 再生";
+        e.target.className = "primary";
+        clearInterval(playInterval);
+        render();
+      }
+    };
+
+    // --- 保存機能 ---
+    document.getElementById('downloadBtn').onclick = () => {
+      const link = document.createElement('a');
+      link.download = `pixel_art_${cols}x${rows}_frame${currentFrameIndex + 1}.png`;
+      link.href = mainCanvas.toDataURL("image/png");
+      link.click();
+    };
+
+    // --- パネルドラッグ＆ドロップ ＆ リサイズ機能 ---
+    let topZIndex = 100;
+
+    function makeDraggableAndResizable(panel) {
+      const header = panel.querySelector('.panel-header');
+      let isDragging = false;
+      let startX, startY, initialLeft, initialTop;
+
+      // 保存された位置とサイズを復元
+      const savedLayout = localStorage.getItem(`panel_layout_${panel.id}`);
+      if (savedLayout) {
+        const { left, top, width, height } = JSON.parse(savedLayout);
+        if (left) panel.style.left = left;
+        if (top) panel.style.top = top;
+        if (width) panel.style.width = width;
+        if (height) panel.style.height = height;
+        panel.style.right = 'auto';
+        panel.style.bottom = 'auto';
+      }
+
+      header.addEventListener('mousedown', (e) => {
+        isDragging = true;
+        startX = e.clientX;
+        startY = e.clientY;
+        const rect = panel.getBoundingClientRect();
+        initialLeft = rect.left;
+        initialTop = rect.top;
+
+        topZIndex++;
+        panel.style.zIndex = topZIndex;
+      });
+
+      document.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+
+        const deltaX = e.clientX - startX;
+        const deltaY = e.clientY - startY;
+
+        let newLeft = initialLeft + deltaX;
+        let newTop = initialTop + deltaY;
+
+        const maxLeft = window.innerWidth - panel.offsetWidth;
+        const maxTop = window.innerHeight - panel.offsetHeight;
+
+        newLeft = Math.max(0, Math.min(newLeft, maxLeft));
+        newTop = Math.max(0, Math.min(newTop, maxTop));
+
+        panel.style.left = `${newLeft}px`;
+        panel.style.top = `${newTop}px`;
+        panel.style.right = 'auto';
+        panel.style.bottom = 'auto';
+      });
+
+      document.addEventListener('mouseup', () => {
+        if (isDragging) {
+          isDragging = false;
+          savePanelLayout(panel);
+        }
+      });
+
+      // サイズ変更の検出と保存（ResizeObserverを使用）
+      const resizeObserver = new ResizeObserver(() => {
+        savePanelLayout(panel);
+      });
+      resizeObserver.observe(panel);
+    }
+
+    function savePanelLayout(panel) {
+      localStorage.setItem(`panel_layout_${panel.id}`, JSON.stringify({
+        left: panel.style.left,
+        top: panel.style.top,
+        width: panel.style.width,
+        height: panel.style.height
+      }));
+    }
+
+    document.querySelectorAll('.draggable-panel').forEach(makeDraggableAndResizable);
+
+    document.getElementById('resetLayoutBtn').onclick = () => {
+      document.querySelectorAll('.draggable-panel').forEach(panel => {
+        localStorage.removeItem(`panel_layout_${panel.id}`);
+      });
+      location.reload();
+    };
+
+    // 起動時処理
+    initEditor();
+    initPalette();
+  </script>
+</body>
+</html>
