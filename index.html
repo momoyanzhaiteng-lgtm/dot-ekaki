@@ -4,8 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <title>可動式ツール付き ドット絵アニメエディター</title>
-  <!-- GIFアニメ出力用ライブラリ -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/upng-js@2.1.0/UPNG.min.js"></script>
   <style>
     :root {
       --bg-color: #1a1a24;
@@ -36,7 +35,6 @@
       position: relative;
     }
 
-    /* ワークスペース */
     #workspace {
       width: 100%;
       height: 100%;
@@ -49,7 +47,6 @@
       cursor: default;
     }
 
-    /* 描画枠コンテナ */
     #canvas-wrapper {
       position: absolute;
       border: 2px solid var(--accent-color);
@@ -59,7 +56,6 @@
       cursor: crosshair;
     }
 
-    /* 透過チェッカー柄背景 */
     .transparent-bg {
       background-image: 
         linear-gradient(45deg, #ccc 25%, transparent 25%), 
@@ -93,7 +89,6 @@
     #onionCanvas { opacity: 0.35; pointer-events: none; }
     #gridCanvas, #hoverCanvas { pointer-events: none; }
 
-    /* 可動・リサイズ対応パネル */
     .draggable-panel {
       position: absolute;
       background: var(--panel-bg);
@@ -136,7 +131,6 @@
       gap: 8px;
     }
 
-    /* UIパーツ設定 */
     .row {
       display: flex;
       align-items: center;
@@ -195,7 +189,6 @@
 
     .btn-group button { flex: 1; }
 
-    /* 十字移動キー用レイアウト */
     .shift-pad {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
@@ -208,7 +201,6 @@
       font-size: 0.8rem;
     }
 
-    /* パレット設定 */
     .palette-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(28px, 1fr));
@@ -229,7 +221,6 @@
       transform: scale(1.1);
     }
 
-    /* パネルのデフォルト位置設定 */
     #panel-size { top: 20px; left: 20px; width: 220px; }
     #panel-tools { top: 150px; left: 20px; width: 200px; }
     #panel-color { top: 20px; right: 20px; width: 200px; }
@@ -239,7 +230,6 @@
 </head>
 <body>
 
-  <!-- メインワークスペース -->
   <div id="workspace">
     <div id="canvas-wrapper" class="transparent-bg">
       <canvas id="onionCanvas"></canvas>
@@ -249,7 +239,6 @@
     </div>
   </div>
 
-  <!-- パネル 1: 描画サイズ・背景設定 -->
   <div id="panel-size" class="draggable-panel">
     <div class="panel-header">📐 描画サイズ & 背景</div>
     <div class="panel-body">
@@ -264,7 +253,6 @@
     </div>
   </div>
 
-  <!-- パネル 2: 描画ツール -->
   <div id="panel-tools" class="draggable-panel">
     <div class="panel-header">✏️ ツール</div>
     <div class="panel-body">
@@ -279,7 +267,6 @@
     </div>
   </div>
 
-  <!-- パネル 3: カラー & パレット -->
   <div id="panel-color" class="draggable-panel">
     <div class="panel-header">🎨 カラーパレット</div>
     <div class="panel-body">
@@ -291,7 +278,6 @@
     </div>
   </div>
 
-  <!-- パネル 4: アニメーション作成 -->
   <div id="panel-anim" class="draggable-panel">
     <div class="panel-header">🎬 アニメーション</div>
     <div class="panel-body">
@@ -308,7 +294,6 @@
         <button id="copyFrameBtn" class="primary">📋 複製</button>
       </div>
 
-      <!-- 1px 上下左右移動コントローラー -->
       <label style="margin-top: 4px; font-weight: bold;">↔ 1px位置調整</label>
       <div class="shift-pad">
         <div></div>
@@ -329,7 +314,6 @@
     </div>
   </div>
 
-  <!-- パネル 5: ズーム & 保存 -->
   <div id="panel-view" class="draggable-panel">
     <div class="panel-header">🔍 ズーム & 保存</div>
     <div class="panel-body">
@@ -338,16 +322,16 @@
         <button id="zoomResetBtn">100%</button>
         <button id="zoomOutBtn">🔍ー</button>
       </div>
-      <div class="btn-group">
-        <button id="downloadBtn" class="primary">💾 コマ(PNG)</button>
-        <button id="downloadGifBtn" class="primary" style="background:#059669;">🎬 アニメ(GIF)</button>
+      <button id="downloadBtn" class="primary" style="width: 100%;">💾 コマ(PNG保存)</button>
+      <div class="btn-group" style="margin-top: 4px;">
+        <button id="downloadApngBtn" class="primary" style="background:#059669;">🎬 アニメ(APNG)</button>
+        <button id="downloadWebmBtn" class="primary" style="background:#2563eb;">🎥 動画(WebM)</button>
       </div>
-      <button id="resetLayoutBtn" style="font-size: 0.65rem; background:#222;">UI配置リセット</button>
+      <button id="resetLayoutBtn" style="font-size: 0.65rem; background:#222; margin-top: 4px;">UI配置リセット</button>
     </div>
   </div>
 
   <script>
-    // --- 状態管理変数 ---
     let cols = 16;
     let rows = 16;
     let pixelScale = 20;
@@ -368,7 +352,6 @@
     let startPanY = 0;
     let isSpacePressed = false;
 
-    // --- DOM要素 ---
     const wrapper = document.getElementById('canvas-wrapper');
     const mainCanvas = document.getElementById('mainCanvas');
     const onionCanvas = document.getElementById('onionCanvas');
@@ -380,7 +363,6 @@
     const gridCtx = gridCanvas.getContext('2d');
     const hoverCtx = hoverCanvas.getContext('2d');
 
-    // --- 初期化 ---
     function initEditor() {
       updateCanvasDimensions();
       if (frames.length === 0) {
@@ -411,7 +393,6 @@
       applyTransform();
     }
 
-    // --- 描画処理 ---
     function render() {
       mainCtx.clearRect(0, 0, mainCanvas.width, mainCanvas.height);
       onionCtx.clearRect(0, 0, onionCanvas.width, onionCanvas.height);
@@ -423,19 +404,19 @@
 
       const showOnion = document.getElementById('onionToggle').checked;
       if (showOnion && currentFrameIndex > 0 && !isPlaying) {
-        drawFrameData(onionCtx, frames[currentFrameIndex - 1]);
+        drawFrameData(onionCtx, frames[currentFrameIndex - 1], pixelScale);
       }
 
-      drawFrameData(mainCtx, frames[currentFrameIndex]);
+      drawFrameData(mainCtx, frames[currentFrameIndex], pixelScale);
       document.getElementById('frameIndicator').textContent = `コマ: ${currentFrameIndex + 1} / ${frames.length}`;
     }
 
-    function drawFrameData(ctx, frameData) {
+    function drawFrameData(ctx, frameData, scale) {
       for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
           if (frameData[r] && frameData[r][c]) {
             ctx.fillStyle = frameData[r][c];
-            ctx.fillRect(c * pixelScale, r * pixelScale, pixelScale, pixelScale);
+            ctx.fillRect(c * scale, r * scale, scale, scale);
           }
         }
       }
@@ -474,7 +455,6 @@
       hoverCtx.fillRect(col * pixelScale, row * pixelScale, pixelScale, pixelScale);
     }
 
-    // --- キャンバス操作 ---
     function handlePointer(e) {
       if (isPanning) {
         panX += e.clientX - startPanX;
@@ -548,7 +528,6 @@
       }
     });
 
-    // --- ズーム ＆ 位置移動 ---
     function applyTransform() {
       wrapper.style.transform = `translate(${panX}px, ${panY}px) scale(${currentZoom})`;
     }
@@ -567,7 +546,6 @@
       updateZoom(currentZoom + (e.deltaY < 0 ? 0.15 : -0.15));
     }, { passive: false });
 
-    // --- カラーパレット設定 ---
     const defaultPalette = [
       '#000000', '#ffffff', '#7f7f7f', '#c3c3c3',
       '#880015', '#ed1c24', '#ff7f27', '#fff200',
@@ -628,7 +606,6 @@
       }
     };
 
-    // --- アニメーション機能 ---
     document.getElementById('addFrameBtn').onclick = () => {
       frames.splice(currentFrameIndex + 1, 0, createEmptyFrame());
       currentFrameIndex++;
@@ -660,7 +637,6 @@
       if (currentFrameIndex < frames.length - 1) { currentFrameIndex++; render(); }
     };
 
-    // --- 1px移動処理（シフト機能） ---
     function shiftFrameData(dx, dy) {
       const current = frames[currentFrameIndex];
       const shifted = createEmptyFrame();
@@ -704,7 +680,7 @@
       }
     };
 
-    // --- 静止画(PNG)保存機能 ---
+    // 静止画PNGダウンロード
     document.getElementById('downloadBtn').onclick = () => {
       const link = document.createElement('a');
       link.download = `pixel_art_${cols}x${rows}_frame${currentFrameIndex + 1}.png`;
@@ -712,52 +688,100 @@
       link.click();
     };
 
-    // --- GIFアニメーション保存機能 ---
-    document.getElementById('downloadGifBtn').onclick = () => {
-      const btn = document.getElementById('downloadGifBtn');
+    // --- 超軽量・高画質 APNG（アニメーションPNG）書き出し ---
+    document.getElementById('downloadApngBtn').onclick = () => {
+      const btn = document.getElementById('downloadApngBtn');
       btn.textContent = "書き出し中...";
       btn.disabled = true;
 
-      const gif = new GIF({
-        workers: 2,
-        quality: 10,
-        width: cols * pixelScale,
-        height: rows * pixelScale,
-        workerScript: 'https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.worker.js'
-      });
+      setTimeout(() => {
+        try {
+          const tempCanvas = document.createElement('canvas');
+          tempCanvas.width = cols;
+          tempCanvas.height = rows;
+          const tempCtx = tempCanvas.getContext('2d');
+          const isTransparent = document.getElementById('transparentToggle').checked;
 
-      const tempCanvas = document.createElement('canvas');
-      tempCanvas.width = cols * pixelScale;
-      tempCanvas.height = rows * pixelScale;
-      const tempCtx = tempCanvas.getContext('2d');
+          const imgBuffers = [];
+          const delays = [];
 
-      const isTransparent = document.getElementById('transparentToggle').checked;
+          frames.forEach((frameData) => {
+            tempCtx.clearRect(0, 0, cols, rows);
+            if (!isTransparent) {
+              tempCtx.fillStyle = '#ffffff';
+              tempCtx.fillRect(0, 0, cols, rows);
+            }
+            drawFrameData(tempCtx, frameData, 1); // 1px原寸スケールで軽量出力
 
-      frames.forEach((frameData) => {
-        tempCtx.clearRect(0, 0, tempCanvas.width, tempCanvas.height);
-        if (!isTransparent) {
-          tempCtx.fillStyle = '#ffffff';
-          tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+            const imgData = tempCtx.getImageData(0, 0, cols, rows);
+            imgBuffers.push(imgData.data.buffer);
+            delays.push(150); // フレーム遅延（ms）
+          });
+
+          // UPNGライブラリでAPNG作成（メモリ負荷が非常に少ない）
+          const apngBuffer = UPNG.encode(imgBuffers, cols, rows, 0, delays);
+          const blob = new Blob([apngBuffer], { type: 'image/png' });
+          const url = URL.createObjectURL(blob);
+
+          const link = document.createElement('a');
+          link.download = `pixel_animation_${cols}x${rows}.png`;
+          link.href = url;
+          link.click();
+        } catch (err) {
+          alert("保存に失敗しました。");
+          console.error(err);
+        } finally {
+          btn.textContent = "🎬 アニメ(APNG)";
+          btn.disabled = false;
         }
-        drawFrameData(tempCtx, frameData);
-        gif.addFrame(tempCtx, { copy: true, delay: 150 });
-      });
-
-      gif.on('finished', function(blob) {
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.download = `pixel_animation_${cols}x${rows}.gif`;
-        link.href = url;
-        link.click();
-
-        btn.textContent = "🎬 アニメ(GIF)";
-        btn.disabled = false;
-      });
-
-      gif.render();
+      }, 50);
     };
 
-    // --- パネルドラッグ＆ドロップ（マウス＆スマホタッチ両対応） ---
+    // --- WebM動画形式書き出し（超高速・大量のコマでもエラーなし） ---
+    document.getElementById('downloadWebmBtn').onclick = () => {
+      const btn = document.getElementById('downloadWebmBtn');
+      btn.textContent = "録画中...";
+      btn.disabled = true;
+
+      try {
+        const stream = mainCanvas.captureStream(30);
+        const recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+        const chunks = [];
+
+        recorder.ondataavailable = e => chunks.push(e.data);
+        recorder.onstop = () => {
+          const blob = new Blob(chunks, { type: 'video/webm' });
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `pixel_animation_${cols}x${rows}.webm`;
+          link.click();
+
+          btn.textContent = "🎥 動画(WebM)";
+          btn.disabled = false;
+        };
+
+        recorder.start();
+
+        let count = 0;
+        const recordInterval = setInterval(() => {
+          currentFrameIndex = count;
+          render();
+          count++;
+          if (count >= frames.length) {
+            clearInterval(recordInterval);
+            setTimeout(() => recorder.stop(), 150);
+          }
+        }, 150);
+
+      } catch (err) {
+        alert("WebM保存に対応していないブラウザです。APNG保存をお試しください。");
+        console.error(err);
+        btn.textContent = "🎥 動画(WebM)";
+        btn.disabled = false;
+      }
+    };
+
     let topZIndex = 100;
 
     function makeDraggableAndResizable(panel) {
@@ -816,12 +840,10 @@
         }
       }
 
-      // マウス操作用
       header.addEventListener('mousedown', (e) => startDrag(e.clientX, e.clientY));
       document.addEventListener('mousemove', (e) => moveDrag(e.clientX, e.clientY));
       document.addEventListener('mouseup', endDrag);
 
-      // スマホタッチ操作用
       header.addEventListener('touchstart', (e) => {
         const touch = e.touches[0];
         startDrag(touch.clientX, touch.clientY);
@@ -835,7 +857,6 @@
 
       document.addEventListener('touchend', endDrag);
 
-      // サイズ変更の検出と保存
       const resizeObserver = new ResizeObserver(() => {
         savePanelLayout(panel);
       });
@@ -860,7 +881,6 @@
       location.reload();
     };
 
-    // 起動時処理
     initEditor();
     initPalette();
   </script>
