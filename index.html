@@ -3,7 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>可動式ツール付き ドット絵アニメエディター</title>
+  <title>ドット絵エディター</title>
+  <!-- 安定したAPNG・PNGエンコーダーライブラリ -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/upng-js@2.1.0/UPNG.min.js"></script>
   <style>
     :root {
@@ -290,7 +292,7 @@
         <button id="nextFrameBtn">次 ▶</button>
       </div>
       <div class="btn-group">
-        <button id="addFrameBtn">＋ 新規コマ</button>
+        <button id="addFrameBtn">＋ 新規</button>
         <button id="copyFrameBtn" class="primary">📋 複製</button>
       </div>
 
@@ -412,9 +414,11 @@
     }
 
     function drawFrameData(ctx, frameData, scale) {
+      if (!frameData) return;
       for (let r = 0; r < rows; r++) {
+        if (!frameData[r]) continue;
         for (let c = 0; c < cols; c++) {
-          if (frameData[r] && frameData[r][c]) {
+          if (frameData[r][c]) {
             ctx.fillStyle = frameData[r][c];
             ctx.fillRect(c * scale, r * scale, scale, scale);
           }
@@ -643,7 +647,7 @@
 
       for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
-          if (current[r][c]) {
+          if (current[r] && current[r][c]) {
             const newR = (r + dy + rows) % rows;
             const newC = (c + dx + cols) % cols;
             shifted[newR][newC] = current[r][c];
@@ -680,7 +684,7 @@
       }
     };
 
-    // 静止画PNGダウンロード
+    // 静止画PNG保存
     document.getElementById('downloadBtn').onclick = () => {
       const link = document.createElement('a');
       link.download = `pixel_art_${cols}x${rows}_frame${currentFrameIndex + 1}.png`;
@@ -688,8 +692,13 @@
       link.click();
     };
 
-    // --- 超軽量・高画質 APNG（アニメーションPNG）書き出し ---
+    // --- 安全・確実な APNG（アニメーションPNG）書き出し ---
     document.getElementById('downloadApngBtn').onclick = () => {
+      if (typeof UPNG === 'undefined') {
+        alert("ライブラリの読み込みに失敗しました。ネット接続を確認してください。");
+        return;
+      }
+
       const btn = document.getElementById('downloadApngBtn');
       btn.textContent = "書き出し中...";
       btn.disabled = true;
@@ -711,14 +720,13 @@
               tempCtx.fillStyle = '#ffffff';
               tempCtx.fillRect(0, 0, cols, rows);
             }
-            drawFrameData(tempCtx, frameData, 1); // 1px原寸スケールで軽量出力
+            drawFrameData(tempCtx, frameData, 1);
 
             const imgData = tempCtx.getImageData(0, 0, cols, rows);
             imgBuffers.push(imgData.data.buffer);
-            delays.push(150); // フレーム遅延（ms）
+            delays.push(150);
           });
 
-          // UPNGライブラリでAPNG作成（メモリ負荷が非常に少ない）
           const apngBuffer = UPNG.encode(imgBuffers, cols, rows, 0, delays);
           const blob = new Blob([apngBuffer], { type: 'image/png' });
           const url = URL.createObjectURL(blob);
@@ -728,7 +736,7 @@
           link.href = url;
           link.click();
         } catch (err) {
-          alert("保存に失敗しました。");
+          alert("APNGの保存に失敗しました: " + err.message);
           console.error(err);
         } finally {
           btn.textContent = "🎬 アニメ(APNG)";
@@ -737,7 +745,7 @@
       }, 50);
     };
 
-    // --- WebM動画形式書き出し（超高速・大量のコマでもエラーなし） ---
+    // --- WebM動画形式書き出し ---
     document.getElementById('downloadWebmBtn').onclick = () => {
       const btn = document.getElementById('downloadWebmBtn');
       btn.textContent = "録画中...";
@@ -745,16 +753,21 @@
 
       try {
         const stream = mainCanvas.captureStream(30);
-        const recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+        let options = { mimeType: 'video/webm' };
+        if (!MediaRecorder.isTypeSupported('video/webm')) {
+          options = { mimeType: 'video/mp4' }; // iOS Safariフォールバック
+        }
+
+        const recorder = new MediaRecorder(stream, options);
         const chunks = [];
 
         recorder.ondataavailable = e => chunks.push(e.data);
         recorder.onstop = () => {
-          const blob = new Blob(chunks, { type: 'video/webm' });
+          const blob = new Blob(chunks, { type: recorder.mimeType });
           const url = URL.createObjectURL(blob);
           const link = document.createElement('a');
           link.href = url;
-          link.download = `pixel_animation_${cols}x${rows}.webm`;
+          link.download = `pixel_animation_${cols}x${rows}.${recorder.mimeType.includes('mp4') ? 'mp4' : 'webm'}`;
           link.click();
 
           btn.textContent = "🎥 動画(WebM)";
@@ -775,7 +788,7 @@
         }, 150);
 
       } catch (err) {
-        alert("WebM保存に対応していないブラウザです。APNG保存をお試しください。");
+        alert("動画の保存に対応していないブラウザです。APNG保存をお試しください。");
         console.error(err);
         btn.textContent = "🎥 動画(WebM)";
         btn.disabled = false;
