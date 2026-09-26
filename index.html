@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>ドット絵ディター</title>
+  <title>LINEスタンプ対応 ドット絵アニメエディター (APNG/GIF対応版)</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/omggif/1.0.10/omggif.min.js"></script>
   <style>
     :root {
       --bg-color: #1a1a24;
@@ -11,6 +12,8 @@
       --panel-header-bg: #353549;
       --accent-color: #6366f1;
       --accent-hover: #4f46e5;
+      --line-green: #06c755;
+      --line-green-hover: #05b34c;
       --text-color: #f3f4f6;
       --border-color: #3f3f56;
     }
@@ -91,7 +94,7 @@
       box-shadow: 0 8px 24px rgba(0,0,0,0.5);
       z-index: 100;
       min-width: 180px;
-      min-height: 120px;
+      min-height: 100px;
       resize: both;
       overflow: auto;
     }
@@ -135,14 +138,22 @@
       gap: 4px;
     }
 
-    input[type="number"] {
-      width: 55px;
+    input[type="number"], select, input[type="text"] {
       background: #1e1e28;
       border: 1px solid var(--border-color);
       color: #fff;
       padding: 4px;
       border-radius: 4px;
+      font-size: 0.75rem;
+    }
+
+    input[type="number"] {
+      width: 55px;
       text-align: center;
+    }
+
+    select {
+      width: 100%;
     }
 
     input[type="color"] {
@@ -169,6 +180,8 @@
     button:hover { background: #4a4a62; }
     button.primary { background: var(--accent-color); }
     button.primary:hover { background: var(--accent-hover); }
+    button.line-btn { background: var(--line-green); }
+    button.line-btn:hover { background: var(--line-green-hover); }
     button.danger { background: #991b1b; }
 
     .btn-group {
@@ -211,11 +224,42 @@
       transform: scale(1.1);
     }
 
-    #panel-size { top: 20px; left: 20px; width: 220px; }
-    #panel-tools { top: 150px; left: 20px; width: 200px; }
+    /* モーダル用スタイル */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(0, 0, 0, 0.6);
+      z-index: 1000;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .modal-card {
+      background: var(--panel-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 16px;
+      width: 300px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .modal-title {
+      font-size: 0.9rem;
+      font-weight: bold;
+    }
+
+    #panel-size { top: 20px; left: 20px; width: 250px; }
+    #panel-tools { top: 230px; left: 20px; width: 200px; }
     #panel-color { top: 20px; right: 20px; width: 200px; }
-    #panel-anim { bottom: 20px; left: 20px; width: 230px; }
-    #panel-view { bottom: 20px; right: 20px; width: 220px; }
+    #panel-anim { bottom: 20px; left: 20px; width: 240px; }
+    #panel-view { bottom: 20px; right: 20px; width: 260px; }
   </style>
 </head>
 <body>
@@ -229,14 +273,41 @@
     </div>
   </div>
 
+  <div id="filenameModal" class="modal-overlay" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-title">💾 保存ファイル名の指定</div>
+      <label style="display: flex; flex-direction: column; gap: 4px;">
+        <span>ファイル名:</span>
+        <input type="text" id="customFilenameInput" style="width: 100%; padding: 6px;" placeholder="例: my_stamp">
+      </label>
+      <div class="btn-group" style="justify-content: flex-end;">
+        <button id="modalCancelBtn">キャンセル</button>
+        <button id="modalConfirmBtn" class="primary">保存</button>
+      </div>
+    </div>
+  </div>
+
   <div id="panel-size" class="draggable-panel">
-    <div class="panel-header">📐 描画サイズ & 背景</div>
+    <div class="panel-header">📐 キャンバスサイズ</div>
     <div class="panel-body">
+      <label style="font-weight:bold;">LINE公式規定プリセット:</label>
+      <select id="presetSelect">
+        <option value="custom">カスタム（ドット絵用）</option>
+        <option value="16x16" selected>16 x 16 (標準ドット)</option>
+        <option value="32x32">32 x 32 (標準ドット)</option>
+        <option value="48x48">48 x 48 (高精細ドット)</option>
+        <option value="line_anim">LINE動くスタンプ (320x270)</option>
+        <option value="line_static">LINE静止画スタンプ (370x320)</option>
+        <option value="line_main">LINEメイン画像 (240x240)</option>
+        <option value="line_tab">LINEトーク部屋タブ (96x74)</option>
+      </select>
+
       <div class="row">
-        <label>幅: <input type="number" id="gridW" value="16" min="4" max="128"></label>
-        <label>高: <input type="number" id="gridH" value="16" min="4" max="128"></label>
+        <label>幅: <input type="number" id="gridW" value="16" min="4" max="370"></label>
+        <label>高: <input type="number" id="gridH" value="16" min="4" max="320"></label>
         <button id="applySizeBtn" class="primary">適用</button>
       </div>
+
       <div class="row">
         <label><input type="checkbox" id="transparentToggle" checked> 背景を透過する</label>
       </div>
@@ -277,8 +348,7 @@
       </div>
       
       <div class="row" style="justify-content: space-between;">
-        <label>速度(ms): <input type="number" id="frameDelayInput" value="200" min="20" max="2000" step="10"></label>
-        <span style="font-size:0.7rem; color:#aaa;">(大きい＝遅い)</span>
+        <label>1コマ表示(ms): <input type="number" id="frameDelayInput" value="200" min="50" max="2000" step="10"></label>
       </div>
 
       <div class="btn-group">
@@ -286,11 +356,11 @@
         <button id="nextFrameBtn">次 ▶</button>
       </div>
       <div class="btn-group">
-        <button id="addFrameBtn">＋ 新規</button>
+        <button id="addFrameBtn">＋ 新規コマ</button>
         <button id="copyFrameBtn" class="primary">📋 複製</button>
       </div>
 
-      <label style="margin-top: 4px; font-weight: bold;">↔ 1px位置調整</label>
+      <label style="margin-top: 4px; font-weight: bold;">↔ 位置調整</label>
       <div class="shift-pad">
         <div></div>
         <button id="shiftUpBtn">▲</button>
@@ -311,28 +381,62 @@
   </div>
 
   <div id="panel-view" class="draggable-panel">
-    <div class="panel-header">🔍 ズーム & 保存</div>
+    <div class="panel-header">💬 書き出し設定</div>
     <div class="panel-body">
       <div class="btn-group">
         <button id="zoomInBtn">🔍＋</button>
         <button id="zoomResetBtn">100%</button>
         <button id="zoomOutBtn">🔍ー</button>
       </div>
-      <button id="downloadApngBtn" class="primary" style="background:#059669; width:100%;">🎬 APNG (.png)</button>
-      <div class="btn-group" style="margin-top: 4px;">
-        <button id="downloadWebmBtn" style="background:#2563eb;">🎥 WebM</button>
-        <button id="downloadBtn" style="background:#4b5563;">💾 1コマ(PNG)</button>
+
+      <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 4px 0;">
+      
+      <label style="font-weight: bold; color: #a7f3d0;">💾 ファイル書き出し</label>
+      
+      <div class="row" style="justify-content: space-between;">
+        <label>拡大倍率:</label>
+        <select id="exportScaleSelect" style="width: 130px;">
+          <option value="1">1倍 (等倍)</option>
+          <option value="auto_line" selected>自動 (LINE規格320px)</option>
+          <option value="5">5倍</option>
+          <option value="10">10倍</option>
+          <option value="20">20倍</option>
+        </select>
       </div>
+
+      <div class="row" style="justify-content: space-between;">
+        <label>APNGループ数:</label>
+        <select id="loopCountSelect" style="width: 110px;">
+          <option value="4" selected>4回 (LINE規定)</option>
+          <option value="1">1回</option>
+          <option value="2">2回</option>
+          <option value="3">3回</option>
+          <option value="0">無限ループ</option>
+        </select>
+      </div>
+
+      <div class="row" style="justify-content: space-between; margin-top: 4px;">
+        <label style="font-weight: bold;">保存形式:</label>
+        <select id="exportFormatSelect" style="width: 140px; font-weight: bold; color: #a7f3d0;">
+          <option value="apng" selected>APNG (LINEスタンプ)</option>
+          <option value="gif">GIF アニメ</option>
+          <option value="webm">WebM 動画</option>
+          <option value="png">PNG 静止画 (現コマ)</option>
+        </select>
+      </div>
+
+      <button id="executeExportBtn" class="line-btn" style="width:100%; margin-top: 4px; padding: 8px;">💾 指定した形式で保存</button>
     </div>
   </div>
 
   <script>
-    // --- 完全自己完結型 APNG エンコーダー ---
+    // --- APNG エンコーダー ---
     class StandaloneApngEncoder {
-      constructor(width, height, delayMs) {
+      constructor(width, height, delayMs, loopCount = 0) {
         this.width = width;
         this.height = height;
         this.delayMs = delayMs;
+        this.loopCount = loopCount;
         this.crcTable = this.makeCrcTable();
       }
 
@@ -377,7 +481,7 @@
         }));
 
         const chunks = [];
-        chunks.push(new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])); // PNG Header
+        chunks.push(new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]));
 
         const firstPng = buffers[0];
         let pos = 8;
@@ -394,11 +498,10 @@
         }
         chunks.push(ihdrChunk);
 
-        // acTL チャンク
         const actlData = new Uint8Array(8);
         const actlView = new DataView(actlData.buffer);
         actlView.setUint32(0, buffers.length);
-        actlView.setUint32(4, 0); // 0 = 永久ループ
+        actlView.setUint32(4, this.loopCount);
         chunks.push(this.writeChunk('acTL', actlData));
 
         let sequenceNumber = 0;
@@ -417,7 +520,6 @@
             pos += 12 + len;
           }
 
-          // fcTL チャンク
           const fctlData = new Uint8Array(26);
           const fctlView = new DataView(fctlData.buffer);
           fctlView.setUint32(0, sequenceNumber++);
@@ -469,6 +571,14 @@
     let startPanX = 0, startPanY = 0;
     let isSpacePressed = false;
 
+    // タッチ操作用変数
+    let touchStartDist = 0;
+    let initialZoom = 1.0;
+    let touchStartMidX = 0;
+    let touchStartMidY = 0;
+    let initialPanX = 0;
+    let initialPanY = 0;
+
     const wrapper = document.getElementById('canvas-wrapper');
     const mainCanvas = document.getElementById('mainCanvas');
     const onionCanvas = document.getElementById('onionCanvas');
@@ -492,6 +602,12 @@
     }
 
     function updateCanvasDimensions() {
+      if (cols > 64 || rows > 64) {
+        pixelScale = Math.max(2, Math.floor(400 / Math.max(cols, rows)));
+      } else {
+        pixelScale = 20;
+      }
+
       const renderW = cols * pixelScale;
       const renderH = rows * pixelScale;
 
@@ -543,7 +659,7 @@
       gridCtx.clearRect(0, 0, gridCanvas.width, gridCanvas.height);
       if (!document.getElementById('gridToggle').checked) return;
 
-      gridCtx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
+      gridCtx.strokeStyle = 'rgba(0, 0, 0, 0.15)';
       gridCtx.lineWidth = 1;
 
       for (let c = 0; c <= cols; c++) {
@@ -599,7 +715,10 @@
       }
     }
 
+    // --- ポインター / マウス操作 ---
     mainCanvas.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'touch') return;
+
       if (e.button === 1 || isSpacePressed) {
         isPanning = true;
         startPanX = e.clientX;
@@ -614,13 +733,75 @@
       }
     });
 
-    mainCanvas.addEventListener('pointermove', handlePointer);
+    mainCanvas.addEventListener('pointermove', (e) => {
+      if (e.pointerType === 'touch') return;
+      handlePointer(e);
+    });
+
     mainCanvas.addEventListener('pointerup', (e) => {
+      if (e.pointerType === 'touch') return;
       isPanning = false;
       isDrawing = false;
       try { mainCanvas.releasePointerCapture(e.pointerId); } catch(err){}
     });
+
     mainCanvas.addEventListener('pointerleave', () => hoverCtx.clearRect(0, 0, hoverCanvas.width, hoverCanvas.height));
+
+    // --- タッチ操作 ---
+    mainCanvas.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 1) {
+        isDrawing = true;
+        const touch = e.touches[0];
+        handlePointer({ clientX: touch.clientX, clientY: touch.clientY });
+      } else if (e.touches.length === 2) {
+        isDrawing = false;
+        isPanning = true;
+
+        const t1 = e.touches[0];
+        const t2 = e.touches[1];
+
+        touchStartDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+        initialZoom = currentZoom;
+
+        touchStartMidX = (t1.clientX + t2.clientX) / 2;
+        touchStartMidY = (t1.clientY + t2.clientY) / 2;
+        initialPanX = panX;
+        initialPanY = panY;
+
+        hoverCtx.clearRect(0, 0, hoverCanvas.width, hoverCanvas.height);
+      }
+    }, { passive: false });
+
+    mainCanvas.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+
+      if (e.touches.length === 1 && isDrawing) {
+        const touch = e.touches[0];
+        handlePointer({ clientX: touch.clientX, clientY: touch.clientY });
+      } else if (e.touches.length === 2) {
+        const t1 = e.touches[0];
+        const t2 = e.touches[1];
+
+        const currentDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+        if (touchStartDist > 0) {
+          const scaleChange = currentDist / touchStartDist;
+          currentZoom = Math.min(Math.max(initialZoom * scaleChange, 0.1), 5.0);
+        }
+
+        const currentMidX = (t1.clientX + t2.clientX) / 2;
+        const currentMidY = (t1.clientY + t2.clientY) / 2;
+
+        panX = initialPanX + (currentMidX - touchStartMidX);
+        panY = initialPanY + (currentMidY - touchStartMidY);
+
+        applyTransform();
+      }
+    }, { passive: false });
+
+    mainCanvas.addEventListener('touchend', (e) => {
+      if (e.touches.length < 2) isPanning = false;
+      if (e.touches.length === 0) isDrawing = false;
+    });
 
     window.addEventListener('keydown', (e) => {
       if (e.code === 'Space' && !isSpacePressed) {
@@ -640,7 +821,7 @@
     }
 
     function updateZoom(newZoom) {
-      currentZoom = Math.min(Math.max(newZoom, 0.2), 5.0);
+      currentZoom = Math.min(Math.max(newZoom, 0.1), 5.0);
       applyTransform();
     }
 
@@ -697,6 +878,22 @@
       wrapper.className = e.target.checked ? 'transparent-bg' : 'opaque-bg';
       render();
     };
+
+    document.getElementById('presetSelect').onchange = (e) => {
+      const val = e.target.value;
+      if (val === '16x16') { setDimensions(16, 16); }
+      else if (val === '32x32') { setDimensions(32, 32); }
+      else if (val === '48x48') { setDimensions(48, 48); }
+      else if (val === 'line_anim') { setDimensions(320, 270); }
+      else if (val === 'line_static') { setDimensions(370, 320); }
+      else if (val === 'line_main') { setDimensions(240, 240); }
+      else if (val === 'line_tab') { setDimensions(96, 74); }
+    };
+
+    function setDimensions(w, h) {
+      document.getElementById('gridW').value = w;
+      document.getElementById('gridH').value = h;
+    }
 
     document.getElementById('applySizeBtn').onclick = () => {
       const newW = parseInt(document.getElementById('gridW').value) || 16;
@@ -769,7 +966,6 @@
 
     document.getElementById('onionToggle').onchange = render;
 
-    // 再生ボタン
     document.getElementById('playBtn').onclick = (e) => {
       isPlaying = !isPlaying;
       if (isPlaying) {
@@ -790,99 +986,259 @@
       }
     };
 
-    // 静止画PNG保存
-    document.getElementById('downloadBtn').onclick = () => {
-      const link = document.createElement('a');
-      link.download = `pixel_art_${cols}x${rows}_frame${currentFrameIndex + 1}.png`;
-      link.href = mainCanvas.toDataURL("image/png");
-      link.click();
-    };
+    function generateScaledCanvas(frameData, scale, isTransparent) {
+      const exportCanvas = document.createElement('canvas');
+      exportCanvas.width = cols * scale;
+      exportCanvas.height = rows * scale;
+      const ctx = exportCanvas.getContext('2d');
+      ctx.imageSmoothingEnabled = false;
 
-    // --- APNG書き出し ---
-    document.getElementById('downloadApngBtn').onclick = async () => {
-      const btn = document.getElementById('downloadApngBtn');
-      btn.textContent = "APNG生成中...";
-      btn.disabled = true;
-
-      const delayMs = parseInt(document.getElementById('frameDelayInput').value) || 200;
-      const isTransparent = document.getElementById('transparentToggle').checked;
-
-      try {
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = cols;
-        tempCanvas.height = rows;
-        const tempCtx = tempCanvas.getContext('2d');
-
-        const canvasUrls = frames.map(frameData => {
-          tempCtx.clearRect(0, 0, cols, rows);
-          if (!isTransparent) {
-            tempCtx.fillStyle = '#ffffff';
-            tempCtx.fillRect(0, 0, cols, rows);
-          }
-          drawFrameData(tempCtx, frameData, 1);
-          return tempCanvas.toDataURL('image/png');
-        });
-
-        const encoder = new StandaloneApngEncoder(cols, rows, delayMs);
-        const apngBlob = await encoder.createPngBlob(canvasUrls);
-
-        const url = URL.createObjectURL(apngBlob);
-        const link = document.createElement('a');
-        link.download = `pixel_animation_${cols}x${rows}.png`;
-        link.href = url;
-        link.click();
-
-      } catch (err) {
-        alert("APNG保存エラー: " + err.message);
-        console.error(err);
-      } finally {
-        btn.textContent = "🎬 APNGアニメ保存 (.png)";
-        btn.disabled = false;
+      if (!isTransparent) {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
       }
-    };
 
-    // WebM動画書き出し
-    document.getElementById('downloadWebmBtn').onclick = () => {
-      try {
-        const stream = mainCanvas.captureStream(30);
-        let options = { mimeType: 'video/webm' };
-        if (!MediaRecorder.isTypeSupported('video/webm')) {
-          options = { mimeType: 'video/mp4' };
-        }
+      drawFrameData(ctx, frameData, scale);
+      return exportCanvas;
+    }
 
-        const recorder = new MediaRecorder(stream, options);
-        const chunks = [];
-        const delayMs = parseInt(document.getElementById('frameDelayInput').value) || 200;
+    function promptFilename(defaultName) {
+      return new Promise((resolve) => {
+        const modal = document.getElementById('filenameModal');
+        const input = document.getElementById('customFilenameInput');
+        const confirmBtn = document.getElementById('modalConfirmBtn');
+        const cancelBtn = document.getElementById('modalCancelBtn');
 
-        recorder.ondataavailable = e => chunks.push(e.data);
-        recorder.onstop = () => {
-          const blob = new Blob(chunks, { type: recorder.mimeType });
-          const url = URL.createObjectURL(blob);
-          const link = document.createElement('a');
-          link.href = url;
-          link.download = `pixel_animation_${cols}x${rows}.${recorder.mimeType.includes('mp4') ? 'mp4' : 'webm'}`;
-          link.click();
+        input.value = defaultName;
+        modal.style.display = 'flex';
+
+        const cleanup = () => {
+          modal.style.display = 'none';
+          confirmBtn.onclick = null;
+          cancelBtn.onclick = null;
         };
 
-        recorder.start();
+        confirmBtn.onclick = () => {
+          const val = input.value.trim();
+          cleanup();
+          resolve(val || defaultName);
+        };
 
-        let count = 0;
-        const recordInterval = setInterval(() => {
-          currentFrameIndex = count;
-          render();
-          count++;
-          if (count >= frames.length) {
-            clearInterval(recordInterval);
-            setTimeout(() => recorder.stop(), delayMs);
+        cancelBtn.onclick = () => {
+          cleanup();
+          resolve(null);
+        };
+      });
+    }
+
+    // --- 保存統一処理 ---
+    document.getElementById('executeExportBtn').onclick = async () => {
+      const format = document.getElementById('exportFormatSelect').value;
+      const btn = document.getElementById('executeExportBtn');
+
+      const scaleMode = document.getElementById('exportScaleSelect').value;
+      let scale = 1;
+      if (scaleMode === 'auto_line') {
+        scale = Math.floor(Math.min(320 / cols, 270 / rows)) || 1;
+      } else {
+        scale = parseInt(scaleMode) || 1;
+      }
+
+      const outWidth = cols * scale;
+      const outHeight = rows * scale;
+      const isTransparent = document.getElementById('transparentToggle').checked;
+      const delayMs = parseInt(document.getElementById('frameDelayInput').value) || 200;
+
+      // --- PNG保存 (静止画) ---
+      if (format === 'png') {
+        const defaultName = `stamp_${outWidth}x${outHeight}_frame${currentFrameIndex + 1}.png`;
+        const filename = await promptFilename(defaultName);
+        if (!filename) return;
+
+        const finalName = filename.endsWith('.png') ? filename : `${filename}.png`;
+        const canvas = generateScaledCanvas(frames[currentFrameIndex], scale, isTransparent);
+        
+        const link = document.createElement('a');
+        link.download = finalName;
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+        return;
+      }
+
+      // --- APNG保存 ---
+      if (format === 'apng') {
+        const defaultName = `line_stamp_${outWidth}x${outHeight}.png`;
+        const filename = await promptFilename(defaultName);
+        if (!filename) return;
+
+        const finalName = filename.endsWith('.png') ? filename : `${filename}.png`;
+        const loopCount = parseInt(document.getElementById('loopCountSelect').value);
+
+        btn.textContent = "APNG生成中...";
+        btn.disabled = true;
+
+        try {
+          const canvasUrls = frames.map(f => generateScaledCanvas(f, scale, isTransparent).toDataURL('image/png'));
+          const encoder = new StandaloneApngEncoder(outWidth, outHeight, delayMs, loopCount);
+          const apngBlob = await encoder.createPngBlob(canvasUrls);
+
+          const url = URL.createObjectURL(apngBlob);
+          const link = document.createElement('a');
+          link.download = finalName;
+          link.href = url;
+          link.click();
+        } catch (err) {
+          alert("APNG保存エラー: " + err.message);
+        } finally {
+          btn.textContent = "💾 指定した形式で保存";
+          btn.disabled = false;
+        }
+        return;
+      }
+
+      // --- GIF保存 ---
+      if (format === 'gif') {
+        if (typeof omggif === 'undefined') {
+          alert("GIFエンコードライブラリが読み込まれていません。ネットワーク接続を確認してください。");
+          return;
+        }
+
+        const defaultName = `animation_${outWidth}x${outHeight}.gif`;
+        const filename = await promptFilename(defaultName);
+        if (!filename) return;
+
+        const finalName = filename.endsWith('.gif') ? filename : `${filename}.gif`;
+
+        btn.textContent = "GIF生成中...";
+        btn.disabled = true;
+
+        setTimeout(() => {
+          try {
+            const buffer = new Uint8Array(outWidth * outHeight * frames.length * 5);
+            const gifWriter = new omggif.GifWriter(buffer, outWidth, outHeight, { loop: 0 });
+
+            frames.forEach(frameData => {
+              const canvas = generateScaledCanvas(frameData, scale, isTransparent);
+              const ctx = canvas.getContext('2d');
+              const imgData = ctx.getImageData(0, 0, outWidth, outHeight);
+              const pixels = imgData.data;
+
+              const paletteMap = new Map();
+              const palette = [];
+              const indexedPixels = new Uint8Array(outWidth * outHeight);
+
+              let transparentIndex = -1;
+
+              for (let i = 0; i < pixels.length; i += 4) {
+                const r = pixels[i];
+                const g = pixels[i + 1];
+                const b = pixels[i + 2];
+                const a = pixels[i + 3];
+
+                if (a < 128) {
+                  if (transparentIndex === -1) {
+                    transparentIndex = palette.length;
+                    palette.push(0x000000);
+                  }
+                  indexedPixels[i / 4] = transparentIndex;
+                  continue;
+                }
+
+                const colorInt = (r << 16) | (g << 8) | b;
+                if (!paletteMap.has(colorInt)) {
+                  if (palette.length >= 256) {
+                    paletteMap.set(colorInt, 0);
+                  } else {
+                    paletteMap.set(colorInt, palette.length);
+                    palette.push(colorInt);
+                  }
+                }
+                indexedPixels[i / 4] = paletteMap.get(colorInt);
+              }
+
+              while (palette.length < 2) palette.push(0x000000);
+
+              const frameOptions = {
+                delay: Math.round(delayMs / 10),
+                palette: palette
+              };
+
+              if (transparentIndex !== -1) {
+                frameOptions.transparent = transparentIndex;
+                frameOptions.disposal = 2; // 前のコマをクリア
+              }
+
+              gifWriter.addFrame(0, 0, outWidth, outHeight, indexedPixels, frameOptions);
+            });
+
+            const gifData = buffer.subarray(0, gifWriter.end());
+            const blob = new Blob([gifData], { type: 'image/gif' });
+            const url = URL.createObjectURL(blob);
+
+            const link = document.createElement('a');
+            link.download = finalName;
+            link.href = url;
+            link.click();
+          } catch (err) {
+            alert("GIF生成エラー: " + err.message);
+            console.error(err);
+          } finally {
+            btn.textContent = "💾 指定した形式で保存";
+            btn.disabled = false;
           }
-        }, delayMs);
+        }, 50);
+        return;
+      }
 
-      } catch (err) {
-        alert("動画の保存に対応していないブラウザです。");
+      // --- WebM保存 ---
+      if (format === 'webm') {
+        try {
+          const stream = mainCanvas.captureStream(30);
+          let options = { mimeType: 'video/webm' };
+          let ext = 'webm';
+          if (!MediaRecorder.isTypeSupported('video/webm')) {
+            options = { mimeType: 'video/mp4' };
+            ext = 'mp4';
+          }
+
+          const defaultName = `animation.${ext}`;
+          const filename = await promptFilename(defaultName);
+          if (!filename) return;
+
+          const finalName = filename.endsWith(`.${ext}`) ? filename : `${filename}.${ext}`;
+
+          const recorder = new MediaRecorder(stream, options);
+          const chunks = [];
+
+          recorder.ondataavailable = e => chunks.push(e.data);
+          recorder.onstop = () => {
+            const blob = new Blob(chunks, { type: recorder.mimeType });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = finalName;
+            link.click();
+          };
+
+          recorder.start();
+
+          let count = 0;
+          const recordInterval = setInterval(() => {
+            currentFrameIndex = count;
+            render();
+            count++;
+            if (count >= frames.length) {
+              clearInterval(recordInterval);
+              setTimeout(() => recorder.stop(), delayMs);
+            }
+          }, delayMs);
+
+        } catch (err) {
+          alert("動画の保存に対応していないブラウザです。");
+        }
       }
     };
 
-    // パネルドラッグ＆リサイズ処理
     let topZIndex = 100;
 
     function makeDraggableAndResizable(panel) {
