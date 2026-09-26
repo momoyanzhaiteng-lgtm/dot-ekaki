@@ -3,8 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>LINEスタンプ対応 ドット絵アニメエディター (APNG/GIF対応版)</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/omggif/1.0.10/omggif.min.js"></script>
+  <title>ドット絵ディター </title>
   <style>
     :root {
       --bg-color: #1a1a24;
@@ -224,7 +223,6 @@
       transform: scale(1.1);
     }
 
-    /* モーダル用スタイル */
     .modal-overlay {
       position: fixed;
       top: 0;
@@ -430,6 +428,173 @@
   </div>
 
   <script>
+    // --- インライン GIF エンコーダー (完全スタンドアロン版) ---
+    class StandaloneGifEncoder {
+      constructor(width, height) {
+        this.width = width;
+        this.height = height;
+        this.data = [];
+      }
+
+      writeHeader() {
+        this.writeString("GIF89a");
+        this.writeWord(this.width);
+        this.writeWord(this.height);
+        this.writeByte(0x70); // カラーテーブルなし (フレーム毎に個別指定)
+        this.writeByte(0);    // 背景色インデックス
+        this.writeByte(0);    // ピクセルアスペクト比
+      }
+
+      writeNetscapeLoopExtension() {
+        this.writeByte(0x21); // 拡張ブロック
+        this.writeByte(0xFF); // アプリケーション拡張
+        this.writeByte(11);   // ブロック長
+        this.writeString("NETSCAPE2.0");
+        this.writeByte(3);    // サブブロック長
+        this.writeByte(1);
+        this.writeWord(0);    // 無限ループ
+        this.writeByte(0);    // ブロック終了
+      }
+
+      addFrame(pixels, palette, transparentIndex, delayMs) {
+        // グラフィック制御拡張ブロック
+        this.writeByte(0x21);
+        this.writeByte(0xF9);
+        this.writeByte(4);
+        let transFlag = (transparentIndex !== -1) ? 1 : 0;
+        let disposal = transFlag ? 2 : 0; // 透明指定があれば前のコマをクリア
+        this.writeByte((disposal << 2) | transFlag);
+        this.writeWord(Math.round(delayMs / 10)); // 1/100秒単位
+        this.writeByte(transFlag ? transparentIndex : 0);
+        this.writeByte(0);
+
+        // 画像構造体
+        this.writeByte(0x2C);
+        this.writeWord(0); // Left
+        this.writeWord(0); // Top
+        this.writeWord(this.width);
+        this.writeWord(this.height);
+
+        // カラーパレット計算 (2の累乗に拡張)
+        let paletteSizeBits = 1;
+        while ((1 << paletteSizeBits) < palette.length) paletteSizeBits++;
+        paletteSizeBits = Math.max(1, paletteSizeBits);
+        const actualPaletteSize = 1 << paletteSizeBits;
+
+        this.writeByte(0x80 | (paletteSizeBits - 1)); // ローカルカラーテーブルフラグ + サイズ
+
+        for (let i = 0; i < actualPaletteSize; i++) {
+          if (i < palette.length) {
+            let color = palette[i];
+            this.writeByte((color >> 16) & 0xFF);
+            this.writeByte((color >> 8) & 0xFF);
+            this.writeByte(color & 0xFF);
+          } else {
+            this.writeByte(0); this.writeByte(0); this.writeByte(0);
+          }
+        }
+
+        // LZW 圧縮処理
+        this.writeLzwData(pixels, Math.max(2, paletteSizeBits));
+      }
+
+      writeLzwData(pixels, minCodeSize) {
+        this.writeByte(minCodeSize);
+
+        let clearCode = 1 << minCodeSize;
+        let eofCode = clearCode + 1;
+        let codeSize = minCodeSize + 1;
+        let maxCode = (1 << codeSize);
+        let nextCode = eofCode + 1;
+
+        let dict = new Map();
+        let buffer = 0;
+        let bits = 0;
+        let bytes = [];
+
+        const emitCode = (code) => {
+          buffer |= (code << bits);
+          bits += codeSize;
+          while (bits >= 8) {
+            bytes.push(buffer & 0xFF);
+            if (bytes.length === 255) {
+              this.writeByte(255);
+              for (let i = 0; i < 255; i++) this.writeByte(bytes[i]);
+              bytes = [];
+            }
+            buffer >>= 8;
+            bits -= 8;
+          }
+        };
+
+        const resetDict = () => {
+          dict.clear();
+          codeSize = minCodeSize + 1;
+          maxCode = (1 << codeSize);
+          nextCode = eofCode + 1;
+        };
+
+        emitCode(clearCode);
+        resetDict();
+
+        let currentStr = String.fromCharCode(pixels[0]);
+
+        for (let i = 1; i < pixels.length; i++) {
+          let k = pixels[i];
+          let combined = currentStr + String.fromCharCode(k);
+          if (dict.has(combined)) {
+            currentStr = combined;
+          } else {
+            if (currentStr.length === 1) {
+              emitCode(currentStr.charCodeAt(0));
+            } else {
+              emitCode(dict.get(currentStr));
+            }
+
+            if (nextCode < 4096) {
+              dict.set(combined, nextCode++);
+              if (nextCode > maxCode && codeSize < 12) {
+                codeSize++;
+                maxCode = (1 << codeSize);
+              }
+            } else {
+              emitCode(clearCode);
+              resetDict();
+            }
+            currentStr = String.fromCharCode(k);
+          }
+        }
+
+        if (currentStr.length === 1) {
+          emitCode(currentStr.charCodeAt(0));
+        } else {
+          emitCode(dict.get(currentStr));
+        }
+
+        emitCode(eofCode);
+
+        if (bits > 0) {
+          bytes.push(buffer & 0xFF);
+        }
+
+        if (bytes.length > 0) {
+          this.writeByte(bytes.length);
+          for (let i = 0; i < bytes.length; i++) this.writeByte(bytes[i]);
+        }
+
+        this.writeByte(0); // ブロック終了
+      }
+
+      finish() {
+        this.writeByte(0x3B); // GIF終端記号
+        return new Uint8Array(this.data);
+      }
+
+      writeByte(val) { this.data.push(val & 0xFF); }
+      writeWord(val) { this.data.push(val & 0xFF, (val >> 8) & 0xFF); }
+      writeString(str) { for (let i = 0; i < str.length; i++) this.data.push(str.charCodeAt(i)); }
+    }
+
     // --- APNG エンコーダー ---
     class StandaloneApngEncoder {
       constructor(width, height, delayMs, loopCount = 0) {
@@ -571,7 +736,6 @@
     let startPanX = 0, startPanY = 0;
     let isSpacePressed = false;
 
-    // タッチ操作用変数
     let touchStartDist = 0;
     let initialZoom = 1.0;
     let touchStartMidX = 0;
@@ -715,7 +879,6 @@
       }
     }
 
-    // --- ポインター / マウス操作 ---
     mainCanvas.addEventListener('pointerdown', (e) => {
       if (e.pointerType === 'touch') return;
 
@@ -747,7 +910,6 @@
 
     mainCanvas.addEventListener('pointerleave', () => hoverCtx.clearRect(0, 0, hoverCanvas.width, hoverCanvas.height));
 
-    // --- タッチ操作 ---
     mainCanvas.addEventListener('touchstart', (e) => {
       if (e.touches.length === 1) {
         isDrawing = true;
@@ -1049,7 +1211,7 @@
       const isTransparent = document.getElementById('transparentToggle').checked;
       const delayMs = parseInt(document.getElementById('frameDelayInput').value) || 200;
 
-      // --- PNG保存 (静止画) ---
+      // --- PNG保存 ---
       if (format === 'png') {
         const defaultName = `stamp_${outWidth}x${outHeight}_frame${currentFrameIndex + 1}.png`;
         const filename = await promptFilename(defaultName);
@@ -1096,13 +1258,8 @@
         return;
       }
 
-      // --- GIF保存 ---
+      // --- GIF保存 (スタンドアロン処理) ---
       if (format === 'gif') {
-        if (typeof omggif === 'undefined') {
-          alert("GIFエンコードライブラリが読み込まれていません。ネットワーク接続を確認してください。");
-          return;
-        }
-
         const defaultName = `animation_${outWidth}x${outHeight}.gif`;
         const filename = await promptFilename(defaultName);
         if (!filename) return;
@@ -1114,8 +1271,9 @@
 
         setTimeout(() => {
           try {
-            const buffer = new Uint8Array(outWidth * outHeight * frames.length * 5);
-            const gifWriter = new omggif.GifWriter(buffer, outWidth, outHeight, { loop: 0 });
+            const encoder = new StandaloneGifEncoder(outWidth, outHeight);
+            encoder.writeHeader();
+            encoder.writeNetscapeLoopExtension();
 
             frames.forEach(frameData => {
               const canvas = generateScaledCanvas(frameData, scale, isTransparent);
@@ -1158,21 +1316,11 @@
 
               while (palette.length < 2) palette.push(0x000000);
 
-              const frameOptions = {
-                delay: Math.round(delayMs / 10),
-                palette: palette
-              };
-
-              if (transparentIndex !== -1) {
-                frameOptions.transparent = transparentIndex;
-                frameOptions.disposal = 2; // 前のコマをクリア
-              }
-
-              gifWriter.addFrame(0, 0, outWidth, outHeight, indexedPixels, frameOptions);
+              encoder.addFrame(indexedPixels, palette, transparentIndex, delayMs);
             });
 
-            const gifData = buffer.subarray(0, gifWriter.end());
-            const blob = new Blob([gifData], { type: 'image/gif' });
+            const gifBytes = encoder.finish();
+            const blob = new Blob([gifBytes], { type: 'image/gif' });
             const url = URL.createObjectURL(blob);
 
             const link = document.createElement('a');
