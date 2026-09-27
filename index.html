@@ -93,9 +93,18 @@
       box-shadow: 0 8px 24px rgba(0,0,0,0.5);
       z-index: 100;
       min-width: 180px;
-      min-height: 100px;
       resize: both;
-      overflow: auto;
+      overflow: hidden;
+    }
+
+    .draggable-panel.collapsed {
+      height: auto !important;
+      min-height: 0 !important;
+      resize: none !important;
+    }
+
+    .draggable-panel.collapsed .panel-body {
+      display: none !important;
     }
 
     .panel-header {
@@ -114,6 +123,20 @@
       top: 0;
       z-index: 10;
       touch-action: none;
+    }
+
+    .panel-toggle-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-color);
+      font-size: 0.9rem;
+      cursor: pointer;
+      padding: 0 4px;
+      line-height: 1;
+      border-radius: 3px;
+    }
+    .panel-toggle-btn:hover {
+      background: rgba(255,255,255,0.2);
     }
 
     .panel-body {
@@ -177,6 +200,7 @@
     }
 
     button:hover { background: #4a4a62; }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
     button.primary { background: var(--accent-color); }
     button.primary:hover { background: var(--accent-hover); }
     button.line-btn { background: var(--line-green); }
@@ -223,6 +247,24 @@
       transform: scale(1.1);
     }
 
+    /* 実寸プレビュー表示エリア */
+    #preview-container {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 80px;
+      background: #111118;
+      border-radius: 6px;
+      padding: 10px;
+      overflow: auto;
+    }
+
+    #previewCanvas {
+      position: relative;
+      image-rendering: pixelated;
+      border: 1px dashed #555;
+    }
+
     .modal-overlay {
       position: fixed;
       top: 0;
@@ -254,8 +296,9 @@
     }
 
     #panel-size { top: 20px; left: 20px; width: 250px; }
-    #panel-tools { top: 230px; left: 20px; width: 200px; }
-    #panel-color { top: 20px; right: 20px; width: 200px; }
+    #panel-tools { top: 230px; left: 20px; width: 220px; }
+    #panel-color { top: 20px; right: 20px; width: 220px; }
+    #panel-preview { top: 270px; right: 20px; width: 220px; }
     #panel-anim { bottom: 20px; left: 20px; width: 240px; }
     #panel-view { bottom: 20px; right: 20px; width: 260px; }
   </style>
@@ -286,7 +329,10 @@
   </div>
 
   <div id="panel-size" class="draggable-panel">
-    <div class="panel-header">📐 キャンバスサイズ</div>
+    <div class="panel-header">
+      <span>📐 キャンバスサイズ</span>
+      <button class="panel-toggle-btn" title="最小化/展開">−</button>
+    </div>
     <div class="panel-body">
       <label style="font-weight:bold;">LINE公式規定プリセット:</label>
       <select id="presetSelect">
@@ -313,13 +359,26 @@
   </div>
 
   <div id="panel-tools" class="draggable-panel">
-    <div class="panel-header">✏️ ツール</div>
+    <div class="panel-header">
+      <span✏️ ツール</span>
+      <button class="panel-toggle-btn" title="最小化/展開">−</button>
+    </div>
     <div class="panel-body">
       <div class="btn-group">
         <button id="penBtn" class="primary">ペン</button>
+        <button id="bucketBtn">バケツ</button>
+        <button id="pickerBtn">スポイト</button>
+      </div>
+      <div class="btn-group" style="margin-top: 2px;">
         <button id="eraserBtn">消しゴム</button>
       </div>
-      <div class="row">
+      
+      <div class="btn-group" style="margin-top: 2px;">
+        <button id="undoBtn">↩️ Undo</button>
+        <button id="redoBtn">↪️ Redo</button>
+      </div>
+
+      <div class="row" style="margin-top: 2px;">
         <label><input type="checkbox" id="gridToggle" checked> グリッド表示</label>
       </div>
       <button id="clearBtn" class="danger">クリア</button>
@@ -327,18 +386,43 @@
   </div>
 
   <div id="panel-color" class="draggable-panel">
-    <div class="panel-header">🎨 カラーパレット</div>
+    <div class="panel-header">
+      <span>🎨 カラーパレット</span>
+      <button class="panel-toggle-btn" title="最小化/展開">−</button>
+    </div>
     <div class="panel-body">
       <div class="row" style="justify-content: space-between;">
         <label>描画色:</label>
         <input type="color" id="colorPicker" value="#000000">
       </div>
       <div class="palette-grid" id="paletteGrid"></div>
+
+      <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 4px 0;">
+      
+      <label style="background:#38384a; padding:6px; border-radius:4px; cursor:pointer; text-align:center; font-weight:bold; font-size:0.75rem;">
+        📁 画像読み込み
+        <input type="file" id="imageLoader" accept="image/*" style="display:none;">
+      </label>
+    </div>
+  </div>
+
+  <div id="panel-preview" class="draggable-panel">
+    <div class="panel-header">
+      <span>👁️ 実寸プレビュー</span>
+      <button class="panel-toggle-btn" title="最小化/展開">−</button>
+    </div>
+    <div class="panel-body">
+      <div id="preview-container" class="transparent-bg">
+        <canvas id="previewCanvas"></canvas>
+      </div>
     </div>
   </div>
 
   <div id="panel-anim" class="draggable-panel">
-    <div class="panel-header">🎬 アニメーション</div>
+    <div class="panel-header">
+      <span>🎬 アニメーション</span>
+      <button class="panel-toggle-btn" title="最小化/展開">−</button>
+    </div>
     <div class="panel-body">
       <div class="row" style="justify-content: space-between;">
         <span id="frameIndicator" style="font-weight: bold; font-size: 0.8rem;">コマ: 1 / 1</span>
@@ -379,7 +463,10 @@
   </div>
 
   <div id="panel-view" class="draggable-panel">
-    <div class="panel-header">💬 書き出し設定</div>
+    <div class="panel-header">
+      <span>💬 書き出し設定</span>
+      <button class="panel-toggle-btn" title="最小化/展開">−</button>
+    </div>
     <div class="panel-body">
       <div class="btn-group">
         <button id="zoomInBtn">🔍＋</button>
@@ -440,48 +527,45 @@
         this.writeString("GIF89a");
         this.writeWord(this.width);
         this.writeWord(this.height);
-        this.writeByte(0x70); // カラーテーブルなし (フレーム毎に個別指定)
-        this.writeByte(0);    // 背景色インデックス
-        this.writeByte(0);    // ピクセルアスペクト比
+        this.writeByte(0x70);
+        this.writeByte(0);
+        this.writeByte(0);
       }
 
       writeNetscapeLoopExtension() {
-        this.writeByte(0x21); // 拡張ブロック
-        this.writeByte(0xFF); // アプリケーション拡張
-        this.writeByte(11);   // ブロック長
+        this.writeByte(0x21);
+        this.writeByte(0xFF);
+        this.writeByte(11);
         this.writeString("NETSCAPE2.0");
-        this.writeByte(3);    // サブブロック長
+        this.writeByte(3);
         this.writeByte(1);
-        this.writeWord(0);    // 無限ループ
-        this.writeByte(0);    // ブロック終了
+        this.writeWord(0);
+        this.writeByte(0);
       }
 
       addFrame(pixels, palette, transparentIndex, delayMs) {
-        // グラフィック制御拡張ブロック
         this.writeByte(0x21);
         this.writeByte(0xF9);
         this.writeByte(4);
         let transFlag = (transparentIndex !== -1) ? 1 : 0;
-        let disposal = transFlag ? 2 : 0; // 透明指定があれば前のコマをクリア
+        let disposal = transFlag ? 2 : 0;
         this.writeByte((disposal << 2) | transFlag);
-        this.writeWord(Math.round(delayMs / 10)); // 1/100秒単位
+        this.writeWord(Math.round(delayMs / 10));
         this.writeByte(transFlag ? transparentIndex : 0);
         this.writeByte(0);
 
-        // 画像構造体
         this.writeByte(0x2C);
-        this.writeWord(0); // Left
-        this.writeWord(0); // Top
+        this.writeWord(0);
+        this.writeWord(0);
         this.writeWord(this.width);
         this.writeWord(this.height);
 
-        // カラーパレット計算 (2の累乗に拡張)
         let paletteSizeBits = 1;
         while ((1 << paletteSizeBits) < palette.length) paletteSizeBits++;
         paletteSizeBits = Math.max(1, paletteSizeBits);
         const actualPaletteSize = 1 << paletteSizeBits;
 
-        this.writeByte(0x80 | (paletteSizeBits - 1)); // ローカルカラーテーブルフラグ + サイズ
+        this.writeByte(0x80 | (paletteSizeBits - 1));
 
         for (let i = 0; i < actualPaletteSize; i++) {
           if (i < palette.length) {
@@ -494,7 +578,6 @@
           }
         }
 
-        // LZW 圧縮処理
         this.writeLzwData(pixels, Math.max(2, paletteSizeBits));
       }
 
@@ -582,11 +665,11 @@
           for (let i = 0; i < bytes.length; i++) this.writeByte(bytes[i]);
         }
 
-        this.writeByte(0); // ブロック終了
+        this.writeByte(0);
       }
 
       finish() {
-        this.writeByte(0x3B); // GIF終端記号
+        this.writeByte(0x3B);
         return new Uint8Array(this.data);
       }
 
@@ -725,8 +808,12 @@
     let frames = [];
     let currentFrameIndex = 0;
 
+    // 履歴スタック (Undo/Redo)
+    let history = [];
+    let historyIndex = -1;
+
+    let currentTool = 'pen'; // 'pen', 'bucket', 'picker', 'eraser'
     let isDrawing = false;
-    let isEraser = false;
     let isPlaying = false;
     let playInterval = null;
 
@@ -748,21 +835,79 @@
     const onionCanvas = document.getElementById('onionCanvas');
     const gridCanvas = document.getElementById('gridCanvas');
     const hoverCanvas = document.getElementById('hoverCanvas');
+    const previewCanvas = document.getElementById('previewCanvas');
 
     const mainCtx = mainCanvas.getContext('2d');
     const onionCtx = onionCanvas.getContext('2d');
     const gridCtx = gridCanvas.getContext('2d');
     const hoverCtx = hoverCanvas.getContext('2d');
+    const previewCtx = previewCanvas.getContext('2d');
 
     function initEditor() {
       updateCanvasDimensions();
       if (frames.length === 0) frames.push(createEmptyFrame());
+      saveHistory();
       render();
       drawGrid();
     }
 
     function createEmptyFrame() {
       return Array(rows).fill(null).map(() => Array(cols).fill(null));
+    }
+
+    // --- Undo / Redo 機能 ---
+    function saveHistory() {
+      history = history.slice(0, historyIndex + 1);
+      const snapshot = {
+        frames: JSON.parse(JSON.stringify(frames)),
+        frameIndex: currentFrameIndex
+      };
+      history.push(snapshot);
+      historyIndex++;
+      updateUndoRedoButtons();
+    }
+
+    function undo() {
+      if (historyIndex > 0) {
+        historyIndex--;
+        restoreState(history[historyIndex]);
+      }
+    }
+
+    function redo() {
+      if (historyIndex < history.length - 1) {
+        historyIndex++;
+        restoreState(history[historyIndex]);
+      }
+    }
+
+    function restoreState(snapshot) {
+      frames = JSON.parse(JSON.stringify(snapshot.frames));
+      currentFrameIndex = snapshot.frameIndex;
+      if (currentFrameIndex >= frames.length) currentFrameIndex = frames.length - 1;
+      render();
+      updateUndoRedoButtons();
+    }
+
+    function updateUndoRedoButtons() {
+      document.getElementById('undoBtn').disabled = (historyIndex <= 0);
+      document.getElementById('redoBtn').disabled = (historyIndex >= history.length - 1);
+    }
+
+    // --- 塗りつぶし (バケツ) アルゴリズム ---
+    function floodFill(startC, startR, fillColor) {
+      const targetColor = frames[currentFrameIndex][startR][startC];
+      if (targetColor === fillColor) return;
+
+      const queue = [[startC, startR]];
+      while (queue.length > 0) {
+        const [c, r] = queue.shift();
+        if (c < 0 || c >= cols || r < 0 || r >= rows) continue;
+        if (frames[currentFrameIndex][r][c] === targetColor) {
+          frames[currentFrameIndex][r][c] = fillColor;
+          queue.push([c + 1, r], [c - 1, r], [c, r + 1], [c, r - 1]);
+        }
+      }
     }
 
     function updateCanvasDimensions() {
@@ -785,6 +930,12 @@
         c.style.height = `${renderH}px`;
       });
 
+      // プレビュー用キャンバス（実寸1倍）のサイズ更新
+      previewCanvas.width = cols;
+      previewCanvas.height = rows;
+      previewCanvas.style.width = `${cols}px`;
+      previewCanvas.style.height = `${rows}px`;
+
       applyTransform();
     }
 
@@ -792,7 +943,8 @@
       mainCtx.clearRect(0, 0, mainCanvas.width, mainCanvas.height);
       onionCtx.clearRect(0, 0, onionCanvas.width, onionCanvas.height);
 
-      if (!document.getElementById('transparentToggle').checked) {
+      const isTransparent = document.getElementById('transparentToggle').checked;
+      if (!isTransparent) {
         mainCtx.fillStyle = '#ffffff';
         mainCtx.fillRect(0, 0, mainCanvas.width, mainCanvas.height);
       }
@@ -804,6 +956,18 @@
 
       drawFrameData(mainCtx, frames[currentFrameIndex], pixelScale);
       document.getElementById('frameIndicator').textContent = `コマ: ${currentFrameIndex + 1} / ${frames.length}`;
+
+      // 実寸プレビューの描画
+      renderPreview(isTransparent);
+    }
+
+    function renderPreview(isTransparent) {
+      previewCtx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
+      if (!isTransparent) {
+        previewCtx.fillStyle = '#ffffff';
+        previewCtx.fillRect(0, 0, previewCanvas.width, previewCanvas.height);
+      }
+      drawFrameData(previewCtx, frames[currentFrameIndex], 1);
     }
 
     function drawFrameData(ctx, frameData, scale) {
@@ -872,9 +1036,28 @@
 
       if (isDrawing && !isPlaying) {
         if (row >= 0 && row < rows && col >= 0 && col < cols) {
-          const color = isEraser ? null : document.getElementById('colorPicker').value;
-          frames[currentFrameIndex][row][col] = color;
-          render();
+          
+          if (currentTool === 'picker') {
+            const pickedColor = frames[currentFrameIndex][row][col];
+            if (pickedColor) {
+              document.getElementById('colorPicker').value = pickedColor;
+            }
+            currentTool = 'pen';
+            updateToolButtons();
+            isDrawing = false;
+            return;
+          }
+
+          const color = currentTool === 'eraser' ? null : document.getElementById('colorPicker').value;
+
+          if (currentTool === 'bucket') {
+            floodFill(col, row, color);
+            render();
+            isDrawing = false; // バケツは1回のみ発動
+          } else {
+            frames[currentFrameIndex][row][col] = color;
+            render();
+          }
         }
       }
     }
@@ -903,8 +1086,11 @@
 
     mainCanvas.addEventListener('pointerup', (e) => {
       if (e.pointerType === 'touch') return;
+      if (isDrawing) {
+        isDrawing = false;
+        saveHistory(); // 描き終わったら履歴に保存
+      }
       isPanning = false;
-      isDrawing = false;
       try { mainCanvas.releasePointerCapture(e.pointerId); } catch(err){}
     });
 
@@ -962,14 +1148,22 @@
 
     mainCanvas.addEventListener('touchend', (e) => {
       if (e.touches.length < 2) isPanning = false;
-      if (e.touches.length === 0) isDrawing = false;
+      if (e.touches.length === 0) {
+        if (isDrawing) {
+          isDrawing = false;
+          saveHistory();
+        }
+      }
     });
 
+    // キーボードショートカット
     window.addEventListener('keydown', (e) => {
       if (e.code === 'Space' && !isSpacePressed) {
         isSpacePressed = true;
         wrapper.classList.add('panning');
       }
+      if (e.ctrlKey && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); }
+      if (e.ctrlKey && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
     });
     window.addEventListener('keyup', (e) => {
       if (e.code === 'Space') {
@@ -1014,7 +1208,7 @@
           document.querySelectorAll('.palette-color').forEach(s => s.classList.remove('selected'));
           swatch.classList.add('selected');
           document.getElementById('colorPicker').value = color;
-          isEraser = false;
+          if (currentTool === 'eraser' || currentTool === 'picker') currentTool = 'pen';
           updateToolButtons();
         };
         paletteGrid.appendChild(swatch);
@@ -1022,22 +1216,75 @@
     }
 
     function updateToolButtons() {
-      document.getElementById('penBtn').className = !isEraser ? 'primary' : '';
-      document.getElementById('eraserBtn').className = isEraser ? 'primary' : '';
+      document.getElementById('penBtn').className = (currentTool === 'pen') ? 'primary' : '';
+      document.getElementById('bucketBtn').className = (currentTool === 'bucket') ? 'primary' : '';
+      document.getElementById('pickerBtn').className = (currentTool === 'picker') ? 'primary' : '';
+      document.getElementById('eraserBtn').className = (currentTool === 'eraser') ? 'primary' : '';
     }
 
-    document.getElementById('penBtn').onclick = () => { isEraser = false; updateToolButtons(); };
-    document.getElementById('eraserBtn').onclick = () => { isEraser = true; updateToolButtons(); };
+    document.getElementById('penBtn').onclick = () => { currentTool = 'pen'; updateToolButtons(); };
+    document.getElementById('bucketBtn').onclick = () => { currentTool = 'bucket'; updateToolButtons(); };
+    document.getElementById('pickerBtn').onclick = () => { currentTool = 'picker'; updateToolButtons(); };
+    document.getElementById('eraserBtn').onclick = () => { currentTool = 'eraser'; updateToolButtons(); };
+
+    document.getElementById('undoBtn').onclick = undo;
+    document.getElementById('redoBtn').onclick = redo;
+
+    // --- 画像読み込み（インポート） ---
+    document.getElementById('imageLoader').addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const img = new Image();
+        img.onload = () => {
+          const tempCanvas = document.createElement('canvas');
+          tempCanvas.width = cols;
+          tempCanvas.height = rows;
+          const tempCtx = tempCanvas.getContext('2d');
+          
+          tempCtx.drawImage(img, 0, 0, cols, rows);
+          const imgData = tempCtx.getImageData(0, 0, cols, rows).data;
+
+          const newFrame = createEmptyFrame();
+          for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < cols; c++) {
+              const idx = (r * cols + c) * 4;
+              const a = imgData[idx + 3];
+              if (a > 128) {
+                const rCol = imgData[idx];
+                const gCol = imgData[idx + 1];
+                const bCol = imgData[idx + 2];
+                newFrame[r][c] = `#${((1 << 24) + (rCol << 16) + (gCol << 8) + bCol).toString(16).slice(1)}`;
+              } else {
+                newFrame[r][c] = null;
+              }
+            }
+          }
+          frames[currentFrameIndex] = newFrame;
+          render();
+          saveHistory();
+        };
+        img.src = event.target.result;
+      };
+      reader.readAsDataURL(file);
+      e.target.value = '';
+    });
+
     document.getElementById('clearBtn').onclick = () => {
       if (confirm('現在のコマをクリアしますか？')) {
         frames[currentFrameIndex] = createEmptyFrame();
         render();
+        saveHistory();
       }
     };
 
     document.getElementById('gridToggle').onchange = drawGrid;
     document.getElementById('transparentToggle').onchange = (e) => {
-      wrapper.className = e.target.checked ? 'transparent-bg' : 'opaque-bg';
+      const isTransparent = e.target.checked;
+      wrapper.className = isTransparent ? 'transparent-bg' : 'opaque-bg';
+      document.getElementById('preview-container').className = isTransparent ? 'transparent-bg' : 'opaque-bg';
       render();
     };
 
@@ -1067,6 +1314,7 @@
         currentFrameIndex = 0;
         panX = 0; panY = 0; currentZoom = 1.0;
         updateCanvasDimensions();
+        saveHistory();
         render();
         drawGrid();
       }
@@ -1076,6 +1324,7 @@
       frames.splice(currentFrameIndex + 1, 0, createEmptyFrame());
       currentFrameIndex++;
       render();
+      saveHistory();
     };
 
     document.getElementById('copyFrameBtn').onclick = () => {
@@ -1083,6 +1332,7 @@
       frames.splice(currentFrameIndex + 1, 0, copy);
       currentFrameIndex++;
       render();
+      saveHistory();
     };
 
     document.getElementById('deleteFrameBtn').onclick = () => {
@@ -1093,6 +1343,7 @@
       frames.splice(currentFrameIndex, 1);
       if (currentFrameIndex >= frames.length) currentFrameIndex = frames.length - 1;
       render();
+      saveHistory();
     };
 
     document.getElementById('prevFrameBtn').onclick = () => {
@@ -1119,6 +1370,7 @@
 
       frames[currentFrameIndex] = shifted;
       render();
+      saveHistory();
     }
 
     document.getElementById('shiftUpBtn').onclick = () => shiftFrameData(0, -1);
@@ -1211,7 +1463,6 @@
       const isTransparent = document.getElementById('transparentToggle').checked;
       const delayMs = parseInt(document.getElementById('frameDelayInput').value) || 200;
 
-      // --- PNG保存 ---
       if (format === 'png') {
         const defaultName = `stamp_${outWidth}x${outHeight}_frame${currentFrameIndex + 1}.png`;
         const filename = await promptFilename(defaultName);
@@ -1227,7 +1478,6 @@
         return;
       }
 
-      // --- APNG保存 ---
       if (format === 'apng') {
         const defaultName = `line_stamp_${outWidth}x${outHeight}.png`;
         const filename = await promptFilename(defaultName);
@@ -1258,7 +1508,6 @@
         return;
       }
 
-      // --- GIF保存 (スタンドアロン処理) ---
       if (format === 'gif') {
         const defaultName = `animation_${outWidth}x${outHeight}.gif`;
         const filename = await promptFilename(defaultName);
@@ -1338,7 +1587,6 @@
         return;
       }
 
-      // --- WebM保存 ---
       if (format === 'webm') {
         try {
           const stream = mainCanvas.captureStream(30);
@@ -1391,19 +1639,45 @@
 
     function makeDraggableAndResizable(panel) {
       const header = panel.querySelector('.panel-header');
+      const toggleBtn = panel.querySelector('.panel-toggle-btn');
       let isDragging = false;
       let startX, startY, initialLeft, initialTop;
 
+      // 配置・サイズの復元
       const savedLayout = localStorage.getItem(`panel_layout_${panel.id}`);
       if (savedLayout) {
-        const { left, top, width, height } = JSON.parse(savedLayout);
+        const { left, top, width, height, collapsed } = JSON.parse(savedLayout);
         if (left) panel.style.left = left;
         if (top) panel.style.top = top;
         if (width) panel.style.width = width;
         if (height) panel.style.height = height;
         panel.style.right = 'auto';
         panel.style.bottom = 'auto';
+
+        if (collapsed) {
+          panel.classList.add('collapsed');
+          if (toggleBtn) toggleBtn.textContent = '＋';
+        }
       }
+
+      // 折りたたみ（最小化）機能
+      function toggleCollapse(e) {
+        if (e) e.stopPropagation();
+        const isCollapsed = panel.classList.toggle('collapsed');
+        if (toggleBtn) {
+          toggleBtn.textContent = isCollapsed ? '＋' : '−';
+        }
+        savePanelLayout(panel);
+      }
+
+      if (toggleBtn) {
+        toggleBtn.addEventListener('click', toggleCollapse);
+      }
+
+      // ヘッダーダブルクリックでの最小化切替
+      header.addEventListener('dblclick', (e) => {
+        if (e.target !== toggleBtn) toggleCollapse(e);
+      });
 
       function startDrag(clientX, clientY) {
         isDragging = true;
@@ -1445,11 +1719,15 @@
         }
       }
 
-      header.addEventListener('mousedown', (e) => startDrag(e.clientX, e.clientY));
+      header.addEventListener('mousedown', (e) => {
+        if (e.target === toggleBtn) return;
+        startDrag(e.clientX, e.clientY);
+      });
       document.addEventListener('mousemove', (e) => moveDrag(e.clientX, e.clientY));
       document.addEventListener('mouseup', endDrag);
 
       header.addEventListener('touchstart', (e) => {
+        if (e.target === toggleBtn) return;
         const touch = e.touches[0];
         startDrag(touch.clientX, touch.clientY);
       }, { passive: true });
@@ -1473,7 +1751,8 @@
         left: panel.style.left,
         top: panel.style.top,
         width: panel.style.width,
-        height: panel.style.height
+        height: panel.style.height,
+        collapsed: panel.classList.contains('collapsed')
       }));
     }
 
