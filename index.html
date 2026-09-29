@@ -86,16 +86,19 @@
     #gridCanvas, #hoverCanvas { pointer-events: none; }
 
     .draggable-panel {
-      position: absolute;
-      background: var(--panel-bg);
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-      z-index: 100;
-      min-width: 180px;
-      resize: both;
-      overflow: hidden;
-    }
+  position: absolute;
+  background: var(--panel-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  z-index: 100;
+  min-width: 180px;
+  max-height: 90vh; 
+  display: flex;
+  flex-direction: column; 
+  resize: both;
+  overflow: hidden; 
+}
 
     .draggable-panel.collapsed {
       height: auto !important;
@@ -107,24 +110,22 @@
       display: none !important;
     }
 
-    .panel-header {
-      padding: 8px 12px;
-      background: var(--panel-header-bg);
-      border-top-left-radius: 7px;
-      border-top-right-radius: 7px;
-      cursor: move;
-      font-size: 0.8rem;
-      font-weight: bold;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      border-bottom: 1px solid var(--border-color);
-      position: sticky;
-      top: 0;
-      z-index: 10;
-      touch-action: none;
-    }
-
+.panel-header {
+  padding: 8px 12px;
+  background: var(--panel-header-bg);
+  border-top-left-radius: 7px;
+  border-top-right-radius: 7px;
+  cursor: move;
+  font-size: 0.8rem;
+  font-weight: bold;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0; 
+  z-index: 10;
+  touch-action: none;
+}
     .panel-toggle-btn {
       background: transparent;
       border: none;
@@ -139,12 +140,15 @@
       background: rgba(255,255,255,0.2);
     }
 
-    .panel-body {
-      padding: 10px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
+.panel-body {
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto; 
+  flex: 1;
+  min-height: 0;
+}
 
     .row {
       display: flex;
